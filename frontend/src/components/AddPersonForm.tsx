@@ -10,7 +10,11 @@ type AddPersonFormProps = {
   onCancel: () => void;
 };
 
-/** Shown when an unknown face is detected — enrolls a new person via the API. */
+/**
+ * Not used in the wearer live experience.
+ * Enrollment is intended via camera roll → face index, not a manual form.
+ * Kept as a temporary helper if caregivers need a fallback during hackathon.
+ */
 export default function AddPersonForm({
   snapshot,
   onCreated,

@@ -11,8 +11,8 @@ export default function HudCard({ person }: HudCardProps) {
   if (!person) {
     return (
       <aside className="hud-card hud-card--empty">
-        <p>No match</p>
-        <p className="muted">HUD awaits a known face</p>
+        <p>No match yet</p>
+        <p className="muted">HUD appears when a camera-roll face is recognized</p>
       </aside>
     );
   }
