@@ -6,8 +6,10 @@ import type { Person } from "@/lib/types";
 
 type AddPersonFormProps = {
   snapshot: string;
-  /** 128-d face embedding captured live; stored for recognition + dedup. */
+  /** Averaged 128-d embedding captured live; stored for recognition + dedup. */
   descriptor?: number[];
+  /** Multiple reference embeddings (angles) captured live for robustness. */
+  descriptors?: number[][];
   onCreated: (person: Person) => void;
   onCancel: () => void;
 };
@@ -20,6 +22,7 @@ type AddPersonFormProps = {
 export default function AddPersonForm({
   snapshot,
   descriptor,
+  descriptors,
   onCreated,
   onCancel,
 }: AddPersonFormProps) {
@@ -46,6 +49,7 @@ export default function AddPersonForm({
         conversationHistory: [],
         spacedRetrievalState: {},
         descriptor: descriptor ?? [],
+        descriptors: descriptors ?? [],
       });
       onCreated(person);
     } catch (err) {

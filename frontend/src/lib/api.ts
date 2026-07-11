@@ -62,6 +62,17 @@ export async function deletePerson(personId: string): Promise<void> {
   return request<void>(`/api/people/${personId}`, { method: "DELETE" });
 }
 
+/** Append a learned reference descriptor (new angle) to an enrolled person. */
+export async function appendDescriptor(
+  personId: string,
+  descriptor: number[],
+): Promise<void> {
+  return request<void>(`/api/people/${personId}/descriptors`, {
+    method: "POST",
+    body: JSON.stringify({ descriptor }),
+  });
+}
+
 export async function transcribeAudio(
   audio: Blob,
   sessionId?: string,

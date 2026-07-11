@@ -17,6 +17,11 @@ export type Person = {
    * duplicate detection don't need to re-run detection on the photo each load.
    */
   descriptor?: number[];
+  /**
+   * Additional reference embeddings (different angles / lighting), grown via
+   * online learning. Matching uses the nearest of these for angle robustness.
+   */
+  descriptors?: number[][];
 };
 
 export type PersonCreate = Omit<Person, "personId">;

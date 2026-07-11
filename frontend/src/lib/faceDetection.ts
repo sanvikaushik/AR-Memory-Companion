@@ -15,6 +15,7 @@
  *   faces does not multiply main-thread cost every frame.
  */
 
+import { appendDescriptor } from "./api";
 import type { FaceBox, Person, TrackedFace } from "./types";
 
 export type FacesCallback = (faces: TrackedFace[]) => void;
@@ -27,6 +28,16 @@ const RECOGNIZE_EVERY_MS = 500;
 
 /** Drop a track if we have not matched a detection to it for this long (ms). */
 const TRACK_STALE_MS = 700;
+
+/**
+ * Keep showing a previously-recognized identity for this many consecutive
+ * recognition misses before flipping to "unknown". Prevents a known face from
+ * briefly turning "unknown" (and re-prompting enrollment) at an odd angle.
+ */
+const KNOWN_HYSTERESIS_MISSES = 4;
+
+/** Min gap between persisting learned descriptors for one person (ms). */
+const LEARN_PERSIST_MS = 4000;
 
 /** Minimum IoU to consider a new detection the same face as an existing track. */
 const IOU_MATCH_THRESHOLD = 0.25;
@@ -51,17 +62,33 @@ type Track = {
   snapshot: string | null;
   lastSeen: number;
   lastRecognizedAt: number;
+  /** Consecutive recognition passes without a confident match (hysteresis). */
+  missCount: number;
+  /** Last time we persisted a learned descriptor for this person (throttle). */
+  lastLearnedAt: number;
 };
 
 /** Max descriptor distance to treat two faces as the same person. */
-const MATCH_DISTANCE = 0.55;
+const MATCH_DISTANCE = 0.6;
+/**
+ * When a confident match is this loose or looser (but still within
+ * MATCH_DISTANCE), it's likely a new head angle — learn it so future frames at
+ * that angle match cleanly.
+ */
+const AUGMENT_MIN_DISTANCE = 0.38;
+/** Cap reference descriptors per person to bound matching cost. */
+const MAX_DESCRIPTORS_PER_PERSON = 24;
 
 let faceapi: FaceApi | null = null;
 let modelsLoaded = false;
 let backendReady = false;
 let faceMatcher: InstanceType<FaceApi["FaceMatcher"]> | null = null;
-/** Kept so we can add newly-enrolled faces live without a full re-enroll. */
-let labeledDescriptors: InstanceType<FaceApi["LabeledFaceDescriptors"]>[] = [];
+/**
+ * Multiple reference descriptors per person (different angles / lighting).
+ * Matching uses the nearest of these, which is what makes recognition robust
+ * to head turns. Kept in memory so we can enroll + learn without a full reload.
+ */
+const descriptorsByPerson = new Map<string, Float32Array[]>();
 
 async function getFaceApi(): Promise<FaceApi> {
   if (!faceapi) {
@@ -123,17 +150,33 @@ export async function loadFaceModels(): Promise<void> {
 }
 
 function rebuildMatcher(api: FaceApi): void {
+  const labeled = [];
+  for (const [personId, descriptors] of descriptorsByPerson) {
+    if (descriptors.length > 0) {
+      labeled.push(new api.LabeledFaceDescriptors(personId, descriptors));
+    }
+  }
   faceMatcher =
-    labeledDescriptors.length > 0
-      ? new api.FaceMatcher(labeledDescriptors, MATCH_DISTANCE)
-      : null;
+    labeled.length > 0 ? new api.FaceMatcher(labeled, MATCH_DISTANCE) : null;
+}
+
+function addDescriptorsToStore(personId: string, descriptors: number[][]): void {
+  const existing = descriptorsByPerson.get(personId) ?? [];
+  for (const d of descriptors) {
+    if (d.length > 0) existing.push(Float32Array.from(d));
+  }
+  // Keep the most recent references if we exceed the cap.
+  if (existing.length > MAX_DESCRIPTORS_PER_PERSON) {
+    existing.splice(0, existing.length - MAX_DESCRIPTORS_PER_PERSON);
+  }
+  descriptorsByPerson.set(personId, existing);
 }
 
 /**
  * Build matcher index from enrolled people.
  *
- * Prefers a stored `descriptor` (fast, reliable) and only falls back to
- * re-detecting from the photo when no descriptor was saved.
+ * Prefers the stored `descriptors` set (multiple angles). Falls back to a
+ * single stored `descriptor`, then to detecting from the photo.
  */
 export async function enrollPeople(people: Person[]): Promise<void> {
   if (!modelsLoaded) {
@@ -142,16 +185,19 @@ export async function enrollPeople(people: Person[]): Promise<void> {
 
   const api = await getFaceApi();
   const options = detectorOptions(api);
-  const labeled: InstanceType<FaceApi["LabeledFaceDescriptors"]>[] = [];
+  descriptorsByPerson.clear();
 
   for (const person of people) {
-    // Fast path: use the descriptor stored at enrollment time.
+    // Fast path: use the descriptor set stored at enrollment / learned online.
+    const stored: number[][] = [];
+    if (person.descriptors && person.descriptors.length > 0) {
+      stored.push(...person.descriptors);
+    }
     if (person.descriptor && person.descriptor.length > 0) {
-      labeled.push(
-        new api.LabeledFaceDescriptors(person.personId, [
-          Float32Array.from(person.descriptor),
-        ]),
-      );
+      stored.push(person.descriptor);
+    }
+    if (stored.length > 0) {
+      addDescriptorsToStore(person.personId, stored);
       continue;
     }
 
@@ -166,33 +212,40 @@ export async function enrollPeople(people: Person[]): Promise<void> {
         .withFaceLandmarks(true)
         .withFaceDescriptor();
       if (!detection) continue;
-      labeled.push(
-        new api.LabeledFaceDescriptors(person.personId, [detection.descriptor]),
-      );
+      addDescriptorsToStore(person.personId, [Array.from(detection.descriptor)]);
     } catch (err) {
       console.warn(`[faceDetection] enroll failed for ${person.personId}`, err);
     }
   }
 
-  labeledDescriptors = labeled;
   rebuildMatcher(api);
 }
 
 /**
- * Add a freshly-saved face to the live matcher so it is recognized
+ * Add freshly-saved faces to the live matcher so the person is recognized
  * immediately (before the next full enrollment refresh).
  */
-export function registerEnrolledDescriptor(
+export function registerEnrolledDescriptors(
   personId: string,
-  descriptor: number[],
+  descriptors: number[][],
 ): void {
-  if (!faceapi || descriptor.length === 0) return;
-  labeledDescriptors.push(
-    new faceapi.LabeledFaceDescriptors(personId, [
-      Float32Array.from(descriptor),
-    ]),
-  );
+  if (!faceapi || descriptors.length === 0) return;
+  addDescriptorsToStore(personId, descriptors);
   rebuildMatcher(faceapi);
+}
+
+/**
+ * Teach an existing person a new reference descriptor (e.g. a new head angle).
+ * Returns true if it was added (i.e. the person is known and under the cap).
+ */
+export function learnDescriptor(personId: string, descriptor: number[]): boolean {
+  if (!faceapi || descriptor.length === 0) return false;
+  const existing = descriptorsByPerson.get(personId);
+  if (!existing) return false;
+  if (existing.length >= MAX_DESCRIPTORS_PER_PERSON) return false;
+  existing.push(Float32Array.from(descriptor));
+  rebuildMatcher(faceapi);
+  return true;
 }
 
 /**
@@ -319,6 +372,14 @@ export function getTrackDescriptor(trackId: number): number[] | null {
   return meanDescriptor(samples);
 }
 
+/**
+ * All recent descriptor samples for a track, used to enroll a person with
+ * several reference embeddings at once (better angle coverage than one).
+ */
+export function getTrackDescriptors(trackId: number): number[][] {
+  return trackDescriptorSamples.get(trackId)?.map((s) => [...s]) ?? [];
+}
+
 /** How many descriptor samples we have collected for a track so far. */
 export function getTrackSampleCount(trackId: number): number {
   return trackDescriptorSamples.get(trackId)?.length ?? 0;
@@ -411,6 +472,8 @@ class FaceTracker {
         snapshot: null,
         lastSeen: now,
         lastRecognizedAt: 0,
+        missCount: 0,
+        lastLearnedAt: 0,
       };
       this.tracks.push(track);
       pairs.push({ track, index: d });
@@ -511,7 +574,8 @@ export function startDetectionLoop(
         const pairs = tracker.associate(rawBoxes, now, video);
 
         for (const { track, index } of pairs) {
-          addDescriptorSample(track.id, Array.from(results[index].descriptor));
+          const frameDescriptor = Array.from(results[index].descriptor);
+          addDescriptorSample(track.id, frameDescriptor);
           // Match against the averaged descriptor for a steadier decision.
           const averaged = Float32Array.from(
             meanDescriptor(trackDescriptorSamples.get(track.id) ?? []),
@@ -520,14 +584,38 @@ export function startDetectionLoop(
             ? faceMatcher.findBestMatch(averaged)
             : null;
           track.lastRecognizedAt = now;
-          track.distance = best ? best.distance : null;
+
           if (best && best.label !== "unknown") {
             track.status = "known";
             track.personId = best.label;
+            track.distance = best.distance;
             track.snapshot = null;
+            track.missCount = 0;
+
+            // Online learning: a looser (but confident) match usually means a
+            // new head angle. Teach it so this angle matches cleanly next time.
+            if (
+              best.distance >= AUGMENT_MIN_DISTANCE &&
+              now - track.lastLearnedAt >= LEARN_PERSIST_MS &&
+              learnDescriptor(best.label, frameDescriptor)
+            ) {
+              track.lastLearnedAt = now;
+              void appendDescriptor(best.label, frameDescriptor).catch(() => {
+                /* best-effort persistence; ignore transient API errors */
+              });
+            }
+          } else if (
+            track.personId &&
+            track.missCount < KNOWN_HYSTERESIS_MISSES
+          ) {
+            // Hold the last identity through brief off-angle misses.
+            track.status = "known";
+            track.missCount += 1;
           } else {
             track.status = "unknown";
             track.personId = null;
+            track.distance = best ? best.distance : null;
+            track.missCount = 0;
             // Refresh the crop so the saved photo reflects the latest frame.
             track.snapshot = cropSnapshot(video, track.box);
           }

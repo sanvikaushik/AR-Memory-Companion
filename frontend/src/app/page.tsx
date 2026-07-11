@@ -10,7 +10,8 @@ import {
   enrollPeople,
   findDuplicatePersonId,
   getTrackDescriptor,
-  registerEnrolledDescriptor,
+  getTrackDescriptors,
+  registerEnrolledDescriptors,
 } from "@/lib/faceDetection";
 import { listPeople } from "@/lib/api";
 import type { Person, TrackedFace } from "@/lib/types";
@@ -147,13 +148,16 @@ export default function HomePage() {
   const handleCreated = useCallback(
     (person: Person, trackId: number) => {
       dismissedTracksRef.current.add(trackId);
-      const descriptor =
-        getTrackDescriptor(trackId) ??
-        pendingFacesRef.current.find((p) => p.trackId === trackId)
-          ?.descriptor ??
-        [];
-      if (descriptor.length > 0) {
-        registerEnrolledDescriptor(person.personId, descriptor);
+      const samples = getTrackDescriptors(trackId);
+      const descriptors =
+        samples.length > 0
+          ? samples
+          : (() => {
+              const d = getTrackDescriptor(trackId);
+              return d ? [d] : [];
+            })();
+      if (descriptors.length > 0) {
+        registerEnrolledDescriptors(person.personId, descriptors);
       }
       setPeople((prev) =>
         prev.some((p) => p.personId === person.personId)
@@ -204,6 +208,7 @@ export default function HomePage() {
                   descriptor={
                     getTrackDescriptor(face.trackId) ?? face.descriptor
                   }
+                  descriptors={getTrackDescriptors(face.trackId)}
                   onCreated={(person) => handleCreated(person, face.trackId)}
                   onCancel={() => handleCancel(face.trackId)}
                 />
