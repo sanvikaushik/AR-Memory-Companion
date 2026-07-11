@@ -1,29 +1,53 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import AddPersonForm from "@/components/AddPersonForm";
 import CameraFeed from "@/components/CameraFeed";
 import HudCard from "@/components/HudCard";
 import QuizScreen from "@/components/QuizScreen";
 import SessionControls from "@/components/SessionControls";
-import { enrollPeople } from "@/lib/faceDetection";
+import {
+  enrollPeople,
+  findDuplicatePersonId,
+  getTrackDescriptor,
+  registerEnrolledDescriptor,
+} from "@/lib/faceDetection";
 import { listPeople } from "@/lib/api";
-import type { FaceDetectionEvent, Person } from "@/lib/types";
+import type { Person, TrackedFace } from "@/lib/types";
 
 type View = "live" | "quiz";
 
+type PendingFace = {
+  trackId: number;
+  snapshot: string;
+  descriptor: number[];
+};
+
+/** Cap how many enroll cards can be open at once. */
+const MAX_PENDING = 6;
+
 /**
  * Live companion UX:
- * camera → face oval → match against DB-enrolled photos → HUD overlay.
- * Enrollment is done via database seed (not this UI).
+ * camera → face ovals → match against enrolled faces → HUD overlays.
+ * Multiple unknown faces can be enrolled in parallel; duplicates are never
+ * saved twice.
  */
 export default function HomePage() {
   const [people, setPeople] = useState<Person[]>([]);
-  const [activePerson, setActivePerson] = useState<Person | null>(null);
+  const [recognizedPeople, setRecognizedPeople] = useState<Person[]>([]);
   const [recognitionHint, setRecognitionHint] = useState(
     "Looking for a face…",
   );
   const [view, setView] = useState<View>("live");
   const [apiStatus, setApiStatus] = useState("Connecting…");
+  const [pendingFaces, setPendingFaces] = useState<PendingFace[]>([]);
+
+  // Mirrors used inside the per-frame callback to avoid stale closures.
+  const pendingFacesRef = useRef<PendingFace[]>([]);
+  const dismissedTracksRef = useRef<Set<number>>(new Set());
+  pendingFacesRef.current = pendingFaces;
+
+  const activePerson = recognizedPeople[0] ?? null;
 
   const refreshPeople = useCallback(async () => {
     try {
@@ -32,7 +56,7 @@ export default function HomePage() {
       await enrollPeople(list);
       setApiStatus(
         list.length === 0
-          ? "No people in DB — run backend seed script"
+          ? "No people in DB — enroll a face below"
           : `${list.length} face(s) loaded from DB`,
       );
     } catch (err) {
@@ -48,22 +72,105 @@ export default function HomePage() {
     void refreshPeople();
   }, [refreshPeople]);
 
-  const onDetection = useCallback(
-    (event: FaceDetectionEvent) => {
-      if (event.status === "known") {
-        const match = people.find((p) => p.personId === event.personId);
-        setActivePerson(match ?? null);
-        setRecognitionHint(
-          match
-            ? `Matched ${match.name}`
-            : "Matched id not in local cache — reload page",
-        );
-      } else {
-        setActivePerson(null);
-        setRecognitionHint("Tracking face…");
+  const onFaces = useCallback(
+    (faces: TrackedFace[]) => {
+      if (faces.length === 0) {
+        setRecognizedPeople([]);
+        setRecognitionHint("Looking for a face…");
+        return;
+      }
+
+      const knownIds = new Set(
+        faces
+          .filter((f) => f.status === "known" && f.personId)
+          .map((f) => f.personId as string),
+      );
+      const matched = people.filter((p) => knownIds.has(p.personId));
+      setRecognizedPeople(matched);
+
+      const unknownCount = faces.filter((f) => f.status === "unknown").length;
+      const parts: string[] = [];
+      if (matched.length > 0) {
+        parts.push(`Recognized ${matched.map((p) => p.name).join(", ")}`);
+      }
+      if (unknownCount > 0) {
+        parts.push(`${unknownCount} unknown`);
+      }
+      if (parts.length === 0) {
+        parts.push(`Tracking ${faces.length} face(s)…`);
+      }
+      setRecognitionHint(parts.join(" · "));
+
+      // Queue every new unknown face for enrollment (in parallel).
+      const current = pendingFacesRef.current;
+      const alreadyPending = new Set(current.map((p) => p.trackId));
+      const additions: PendingFace[] = [];
+
+      for (const face of faces) {
+        if (current.length + additions.length >= MAX_PENDING) break;
+        if (
+          face.status !== "unknown" ||
+          !face.snapshot ||
+          alreadyPending.has(face.trackId) ||
+          dismissedTracksRef.current.has(face.trackId)
+        ) {
+          continue;
+        }
+        const descriptor = getTrackDescriptor(face.trackId) ?? [];
+        // Dedup: skip a face that already matches an enrolled person.
+        if (descriptor.length > 0 && findDuplicatePersonId(descriptor) !== null) {
+          dismissedTracksRef.current.add(face.trackId);
+          continue;
+        }
+        additions.push({
+          trackId: face.trackId,
+          snapshot: face.snapshot,
+          descriptor,
+        });
+      }
+
+      if (additions.length > 0) {
+        const next = [...current, ...additions];
+        pendingFacesRef.current = next;
+        setPendingFaces(next);
       }
     },
     [people],
+  );
+
+  const removePending = useCallback((trackId: number) => {
+    const next = pendingFacesRef.current.filter((p) => p.trackId !== trackId);
+    pendingFacesRef.current = next;
+    setPendingFaces(next);
+  }, []);
+
+  const handleCreated = useCallback(
+    (person: Person, trackId: number) => {
+      dismissedTracksRef.current.add(trackId);
+      const descriptor =
+        getTrackDescriptor(trackId) ??
+        pendingFacesRef.current.find((p) => p.trackId === trackId)
+          ?.descriptor ??
+        [];
+      if (descriptor.length > 0) {
+        registerEnrolledDescriptor(person.personId, descriptor);
+      }
+      setPeople((prev) =>
+        prev.some((p) => p.personId === person.personId)
+          ? prev
+          : [...prev, person],
+      );
+      removePending(trackId);
+    },
+    [removePending],
+  );
+
+  const handleCancel = useCallback(
+    (trackId: number) => {
+      dismissedTracksRef.current.add(trackId);
+      removePending(trackId);
+    },
+    [removePending],
   );
 
   return (
@@ -87,8 +194,31 @@ export default function HomePage() {
         <QuizScreen person={activePerson} onDone={() => setView("live")} />
       ) : (
         <div className="live-layout">
-          <CameraFeed onDetection={onDetection} />
-          <HudCard person={activePerson} />
+          <CameraFeed onFaces={onFaces} people={people} />
+          {pendingFaces.length > 0 && (
+            <div className="enroll-list">
+              {pendingFaces.map((face) => (
+                <AddPersonForm
+                  key={face.trackId}
+                  snapshot={face.snapshot}
+                  descriptor={
+                    getTrackDescriptor(face.trackId) ?? face.descriptor
+                  }
+                  onCreated={(person) => handleCreated(person, face.trackId)}
+                  onCancel={() => handleCancel(face.trackId)}
+                />
+              ))}
+            </div>
+          )}
+          <div className="hud-stack">
+            {recognizedPeople.length > 0 ? (
+              recognizedPeople.map((person) => (
+                <HudCard key={person.personId} person={person} />
+              ))
+            ) : (
+              <HudCard person={null} />
+            )}
+          </div>
           <SessionControls personId={activePerson?.personId} />
         </div>
       )}

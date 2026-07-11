@@ -1,7 +1,8 @@
+import math
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response, status
 from pymongo import ReturnDocument
 
 from app.db.mongo import get_people_collection
@@ -9,10 +10,36 @@ from app.models.person import Person, PersonCreate, PersonUpdate
 
 router = APIRouter(prefix="/people", tags=["people"])
 
+# Max L2 distance between 128-d embeddings to treat two faces as the same
+# person. Matches the frontend FaceMatcher threshold.
+DEDUP_DISTANCE = 0.55
+
 
 def _doc_to_person(doc: dict[str, Any]) -> Person:
     doc = {k: v for k, v in doc.items() if k != "_id"}
     return Person(**doc)
+
+
+def _euclidean(a: list[float], b: list[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return math.inf
+    return math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b)))
+
+
+async def _find_duplicate(descriptor: list[float]) -> Person | None:
+    """Return an existing person whose face matches this descriptor, if any."""
+    if not descriptor:
+        return None
+    collection = get_people_collection()
+    best: Person | None = None
+    best_distance = DEDUP_DISTANCE
+    async for doc in collection.find({"descriptor": {"$ne": []}}):
+        person = _doc_to_person(doc)
+        distance = _euclidean(descriptor, person.descriptor)
+        if distance < best_distance:
+            best_distance = distance
+            best = person
+    return best
 
 
 @router.get("", response_model=list[Person])
@@ -35,8 +62,16 @@ async def get_person(person_id: str) -> Person:
 
 
 @router.post("", response_model=Person, status_code=201)
-async def create_person(payload: PersonCreate) -> Person:
+async def create_person(payload: PersonCreate, response: Response) -> Person:
     collection = get_people_collection()
+
+    # Dedup safety net: if this face already matches an enrolled person,
+    # return the existing record instead of creating a duplicate.
+    existing = await _find_duplicate(payload.descriptor)
+    if existing is not None:
+        response.status_code = status.HTTP_200_OK
+        return existing
+
     person = Person(
         personId=str(uuid.uuid4()),
         name=payload.name,
@@ -45,6 +80,7 @@ async def create_person(payload: PersonCreate) -> Person:
         facts=payload.facts,
         conversationHistory=payload.conversationHistory,
         spacedRetrievalState=payload.spacedRetrievalState,
+        descriptor=payload.descriptor,
     )
     await collection.insert_one(person.model_dump())
     return person

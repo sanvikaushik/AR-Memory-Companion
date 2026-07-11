@@ -17,6 +17,8 @@ class Person(BaseModel):
     facts: list[str] = Field(default_factory=list)
     conversationHistory: list[ConversationEntry] = Field(default_factory=list)
     spacedRetrievalState: dict[str, Any] = Field(default_factory=dict)
+    # 128-d face embedding used for recognition + duplicate detection.
+    descriptor: list[float] = Field(default_factory=list)
 
 
 class PersonCreate(BaseModel):
@@ -26,6 +28,7 @@ class PersonCreate(BaseModel):
     facts: list[str] = Field(default_factory=list)
     conversationHistory: list[ConversationEntry] = Field(default_factory=list)
     spacedRetrievalState: dict[str, Any] = Field(default_factory=dict)
+    descriptor: list[float] = Field(default_factory=list)
 
 
 class PersonUpdate(BaseModel):
@@ -35,3 +38,4 @@ class PersonUpdate(BaseModel):
     facts: list[str] | None = None
     conversationHistory: list[ConversationEntry] | None = None
     spacedRetrievalState: dict[str, Any] | None = None
+    descriptor: list[float] | None = None

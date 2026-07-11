@@ -98,6 +98,54 @@ button:disabled {
     inset 0 0 0 1px rgba(61, 154, 122, 0.25);
   pointer-events: none;
   z-index: 2;
+  transition:
+    left 90ms linear,
+    top 90ms linear,
+    width 90ms linear,
+    height 90ms linear;
+}
+
+.face-oval--known {
+  border-color: var(--accent);
+}
+
+.face-oval--unknown {
+  border-color: var(--danger);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.35),
+    inset 0 0 0 1px rgba(196, 92, 92, 0.25);
+}
+
+.face-oval--pending {
+  border-color: var(--muted);
+  border-style: dashed;
+}
+
+.face-label {
+  position: absolute;
+  left: 50%;
+  bottom: -1.4rem;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(15, 20, 25, 0.85);
+  color: var(--text);
+}
+
+.face-count {
+  position: absolute;
+  top: 0.6rem;
+  left: 0.6rem;
+  z-index: 3;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(15, 20, 25, 0.8);
+  color: var(--muted);
 }
 
 .camera-status,
@@ -111,17 +159,26 @@ button:disabled {
   color: var(--danger);
 }
 
-.hud-card {
+.hud-stack {
   position: fixed;
   top: 1.25rem;
   right: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
   width: min(280px, calc(100vw - 2rem));
+  max-height: calc(100vh - 2.5rem);
+  overflow-y: auto;
+  z-index: 20;
+}
+
+.hud-card {
+  width: 100%;
   background: rgba(26, 34, 44, 0.92);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 1rem;
   backdrop-filter: blur(8px);
-  z-index: 20;
 }
 
 .hud-card h2 {
@@ -147,6 +204,17 @@ button:disabled {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 1rem;
+}
+
+.enroll-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.enroll-list .add-person-form {
+  flex: 1 1 260px;
+  max-width: 340px;
 }
 
 .add-person-form {

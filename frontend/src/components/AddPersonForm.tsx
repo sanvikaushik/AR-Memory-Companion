@@ -6,17 +6,20 @@ import type { Person } from "@/lib/types";
 
 type AddPersonFormProps = {
   snapshot: string;
+  /** 128-d face embedding captured live; stored for recognition + dedup. */
+  descriptor?: number[];
   onCreated: (person: Person) => void;
   onCancel: () => void;
 };
 
 /**
- * Not used in the wearer live experience.
- * Enrollment is intended via camera roll → face index, not a manual form.
- * Kept as a temporary helper if caregivers need a fallback during hackathon.
+ * Enroll an unknown face detected in the live feed.
+ * The captured descriptor is saved alongside the photo so future sessions
+ * recognize this person and never create a duplicate record.
  */
 export default function AddPersonForm({
   snapshot,
+  descriptor,
   onCreated,
   onCancel,
 }: AddPersonFormProps) {
@@ -42,6 +45,7 @@ export default function AddPersonForm({
         facts,
         conversationHistory: [],
         spacedRetrievalState: {},
+        descriptor: descriptor ?? [],
       });
       onCreated(person);
     } catch (err) {

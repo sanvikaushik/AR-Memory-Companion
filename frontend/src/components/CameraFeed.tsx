@@ -1,34 +1,50 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   loadFaceModels,
   mapBoxToElementPercent,
   startDetectionLoop,
 } from "@/lib/faceDetection";
-import type { FaceDetectionEvent } from "@/lib/types";
+import type { Person, TrackedFace } from "@/lib/types";
 
 type CameraFeedProps = {
-  onDetection: (event: FaceDetectionEvent) => void;
+  onFaces: (faces: TrackedFace[]) => void;
+  /** Used to label recognized ovals with a person's name. */
+  people?: Person[];
+};
+
+type OverlayFace = {
+  trackId: number;
+  status: TrackedFace["status"];
+  label: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
 };
 
 /**
- * Webcam + live oval face overlay (face-api.js TinyFaceDetector).
+ * Webcam + live multi-face oval overlays (face-api.js TinyFaceDetector).
+ * Renders one labeled oval per tracked face.
  */
-export default function CameraFeed({ onDetection }: CameraFeedProps) {
+export default function CameraFeed({ onFaces, people = [] }: CameraFeedProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const onDetectionRef = useRef(onDetection);
+  const onFacesRef = useRef(onFaces);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [loadingModels, setLoadingModels] = useState(true);
-  const [overlay, setOverlay] = useState<{
-    left: number;
-    top: number;
-    width: number;
-    height: number;
-  } | null>(null);
+  const [overlays, setOverlays] = useState<OverlayFace[]>([]);
 
-  onDetectionRef.current = onDetection;
+  onFacesRef.current = onFaces;
+
+  const nameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of people) map.set(p.personId, p.name);
+    return map;
+  }, [people]);
+  const nameByIdRef = useRef(nameById);
+  nameByIdRef.current = nameById;
 
   useEffect(() => {
     let stopLoop: (() => void) | undefined;
@@ -56,10 +72,26 @@ export default function CameraFeed({ onDetection }: CameraFeedProps) {
         await video.play();
         setReady(true);
 
-        stopLoop = startDetectionLoop(video, (event) => {
-          const mapped = mapBoxToElementPercent(event.box, video);
-          setOverlay(mapped);
-          onDetectionRef.current(event);
+        stopLoop = startDetectionLoop(video, (faces) => {
+          const mapped: OverlayFace[] = faces.map((face) => {
+            const box = mapBoxToElementPercent(face.box, video);
+            const name = face.personId
+              ? nameByIdRef.current.get(face.personId)
+              : undefined;
+            return {
+              trackId: face.trackId,
+              status: face.status,
+              label:
+                face.status === "known"
+                  ? name ?? "Recognized"
+                  : face.status === "unknown"
+                    ? "Unknown"
+                    : "…",
+              ...box,
+            };
+          });
+          setOverlays(mapped);
+          onFacesRef.current(faces);
         });
       } catch (err) {
         setLoadingModels(false);
@@ -81,17 +113,23 @@ export default function CameraFeed({ onDetection }: CameraFeedProps) {
   return (
     <div className="camera-feed">
       <video ref={videoRef} playsInline muted className="camera-video" />
-      {overlay && (
+      {overlays.map((face) => (
         <div
-          className="face-oval"
+          key={face.trackId}
+          className={`face-oval face-oval--${face.status}`}
           style={{
-            left: `${overlay.left}%`,
-            top: `${overlay.top}%`,
-            width: `${overlay.width}%`,
-            height: `${overlay.height}%`,
+            left: `${face.left}%`,
+            top: `${face.top}%`,
+            width: `${face.width}%`,
+            height: `${face.height}%`,
           }}
           aria-hidden
-        />
+        >
+          <span className="face-label">{face.label}</span>
+        </div>
+      ))}
+      {overlays.length > 0 && (
+        <span className="face-count">{overlays.length} face(s)</span>
       )}
       {loadingModels && (
         <p className="camera-status">Loading face models…</p>
