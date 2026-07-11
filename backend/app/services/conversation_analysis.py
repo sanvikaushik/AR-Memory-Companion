@@ -82,7 +82,7 @@ async def analyze_conversation(
 
     names = [n.strip() for n in (known_speakers or []) if n and n.strip()]
     if not names:
-        names = ["Ishaan", "Sanvi"]
+        names = ["Ishaan Chandra", "Sanvi Kaushik"]
 
     segment_lines: list[str] = []
     for i, seg in enumerate(segments or []):

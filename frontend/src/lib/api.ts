@@ -74,6 +74,52 @@ export async function appendDescriptor(
   });
 }
 
+/** Append a camera-roll photo (and optional face descriptor) to a person. */
+export async function appendPhoto(
+  personId: string,
+  photo: string,
+  descriptor: number[] = [],
+): Promise<Person> {
+  return request<Person>(`/api/people/${personId}/photos`, {
+    method: "POST",
+    body: JSON.stringify({ photo, descriptor }),
+  });
+}
+
+export type SeedPhotoMeta = {
+  id: string;
+  filename: string;
+  url: string;
+};
+
+/** List photos available under backend/seed (browser-ready URLs). */
+export async function listSeedPhotos(): Promise<SeedPhotoMeta[]> {
+  const photos = await request<SeedPhotoMeta[]>("/api/seed/photos");
+  return photos.map((p) => ({
+    ...p,
+    url: `${API_BASE}${p.url}`,
+  }));
+}
+
+/** Boy → Ishaan Chandra, girl → Sanvi Kaushik (fixed DB records). */
+export async function assignHardcodedFace(
+  gender: "male" | "female",
+  payload: {
+    photo: string;
+    descriptor?: number[];
+    descriptors?: number[][];
+  },
+): Promise<Person> {
+  return request<Person>(`/api/people/hardcoded/${gender}`, {
+    method: "POST",
+    body: JSON.stringify({
+      photo: payload.photo,
+      descriptor: payload.descriptor ?? [],
+      descriptors: payload.descriptors ?? [],
+    }),
+  });
+}
+
 export async function transcribeAudio(
   audio: Blob,
   sessionId?: string,

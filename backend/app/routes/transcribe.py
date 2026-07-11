@@ -64,7 +64,7 @@ async def transcribe_audio(
             known = [s.strip() for s in speakers.split(",") if s.strip()]
 
     if not known:
-        known = ["Ishaan", "Sanvi"]
+        known = ["Ishaan Chandra", "Sanvi Kaushik"]
 
     try:
         result = await audio_to_transcript(

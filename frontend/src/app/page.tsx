@@ -1,37 +1,24 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import AddPersonForm from "@/components/AddPersonForm";
 import CameraFeed from "@/components/CameraFeed";
 import HudCard from "@/components/HudCard";
 import QuizScreen from "@/components/QuizScreen";
 import SessionControls from "@/components/SessionControls";
 import {
+  HARDCODED_BY_GENDER,
   enrollPeople,
-  findDuplicatePersonId,
-  getTrackDescriptor,
-  getTrackDescriptors,
-  registerEnrolledDescriptors,
+  type EstimatedGender,
 } from "@/lib/faceDetection";
 import { listPeople } from "@/lib/api";
 import type { Person, TrackedFace } from "@/lib/types";
 
 type View = "live" | "quiz";
 
-type PendingFace = {
-  trackId: number;
-  snapshot: string;
-  descriptor: number[];
-};
-
-/** Cap how many enroll cards can be open at once. */
-const MAX_PENDING = 6;
-
 /**
  * Live companion UX:
- * camera → face ovals → match against enrolled faces → HUD overlays.
- * Multiple unknown faces can be enrolled in parallel; duplicates are never
- * saved twice.
+ * camera → boy/girl → show Ishaan / Sanvi HUD (LinkedIn info from DB).
+ * Does NOT capture live photos — add profile + camera-roll photos on the HUD.
  */
 export default function HomePage() {
   const [people, setPeople] = useState<Person[]>([]);
@@ -41,12 +28,10 @@ export default function HomePage() {
   );
   const [view, setView] = useState<View>("live");
   const [apiStatus, setApiStatus] = useState("Connecting…");
-  const [pendingFaces, setPendingFaces] = useState<PendingFace[]>([]);
 
-  // Mirrors used inside the per-frame callback to avoid stale closures.
-  const pendingFacesRef = useRef<PendingFace[]>([]);
-  const dismissedTracksRef = useRef<Set<number>>(new Set());
-  pendingFacesRef.current = pendingFaces;
+  const peopleRef = useRef<Person[]>([]);
+  const genderByTrackRef = useRef<Map<number, EstimatedGender>>(new Map());
+  peopleRef.current = people;
 
   const activePerson = recognizedPeople[0] ?? null;
 
@@ -54,11 +39,12 @@ export default function HomePage() {
     try {
       const list = await listPeople();
       setPeople(list);
+      peopleRef.current = list;
       await enrollPeople(list);
       setApiStatus(
         list.length === 0
-          ? "No people in DB — enroll a face below"
-          : `${list.length} face(s) loaded from DB`,
+          ? "No people in DB yet"
+          : `${list.length} profile(s) loaded`,
       );
     } catch (err) {
       setApiStatus(
@@ -73,6 +59,18 @@ export default function HomePage() {
     void refreshPeople();
   }, [refreshPeople]);
 
+  const personForGender = useCallback(
+    (gender: EstimatedGender, list: Person[]): Person | null => {
+      const assumed = HARDCODED_BY_GENDER[gender];
+      return (
+        list.find((p) => p.personId === assumed.personId) ??
+        list.find((p) => p.name === assumed.name) ??
+        null
+      );
+    },
+    [],
+  );
+
   const onFaces = useCallback(
     (faces: TrackedFace[]) => {
       if (faces.length === 0) {
@@ -81,100 +79,59 @@ export default function HomePage() {
         return;
       }
 
-      const knownIds = new Set(
-        faces
-          .filter((f) => f.status === "known" && f.personId)
-          .map((f) => f.personId as string),
-      );
-      const matched = people.filter((p) => knownIds.has(p.personId));
-      setRecognizedPeople(matched);
+      const list = peopleRef.current;
+      const matchedById = new Map<string, Person>();
 
-      const unknownCount = faces.filter((f) => f.status === "unknown").length;
-      const parts: string[] = [];
-      if (matched.length > 0) {
-        parts.push(`Recognized ${matched.map((p) => p.name).join(", ")}`);
-      }
-      if (unknownCount > 0) {
-        parts.push(`${unknownCount} unknown`);
-      }
-      if (parts.length === 0) {
-        parts.push(`Tracking ${faces.length} face(s)…`);
-      }
-      setRecognitionHint(parts.join(" · "));
-
-      // Queue every new unknown face for enrollment (in parallel).
-      const current = pendingFacesRef.current;
-      const alreadyPending = new Set(current.map((p) => p.trackId));
-      const additions: PendingFace[] = [];
-
+      // Face-matcher hits (from manually enrolled photos).
       for (const face of faces) {
-        if (current.length + additions.length >= MAX_PENDING) break;
-        if (
-          face.status !== "unknown" ||
-          !face.snapshot ||
-          alreadyPending.has(face.trackId) ||
-          dismissedTracksRef.current.has(face.trackId)
-        ) {
-          continue;
+        if (face.status === "known" && face.personId) {
+          const person = list.find((p) => p.personId === face.personId);
+          if (person) matchedById.set(person.personId, person);
         }
-        const descriptor = getTrackDescriptor(face.trackId) ?? [];
-        // Dedup: skip a face that already matches an enrolled person.
-        if (descriptor.length > 0 && findDuplicatePersonId(descriptor) !== null) {
-          dismissedTracksRef.current.add(face.trackId);
-          continue;
+      }
+
+      // Boy/girl → Ishaan / Sanvi (no live photo capture).
+      for (const face of faces) {
+        const gender: EstimatedGender | null =
+          face.gender ?? genderByTrackRef.current.get(face.trackId) ?? null;
+        if (face.gender) {
+          genderByTrackRef.current.set(face.trackId, face.gender);
         }
-        additions.push({
-          trackId: face.trackId,
-          snapshot: face.snapshot,
-          descriptor,
-        });
+        if (!gender) continue;
+
+        const person = personForGender(gender, list);
+        if (person) {
+          matchedById.set(person.personId, person);
+        } else {
+          const assumed = HARDCODED_BY_GENDER[gender];
+          matchedById.set(assumed.personId, {
+            personId: assumed.personId,
+            name: assumed.name,
+            relationship: assumed.relationship,
+            headline: "",
+            linkedinUrl: "",
+            photo: "",
+            photos: [],
+            facts: [],
+            conversationHistory: [],
+            spacedRetrievalState: {},
+          });
+        }
       }
 
-      if (additions.length > 0) {
-        const next = [...current, ...additions];
-        pendingFacesRef.current = next;
-        setPendingFaces(next);
+      const matched = Array.from(matchedById.values());
+      if (matched.length > 0) {
+        setRecognizedPeople(matched);
+        setRecognitionHint(
+          `Recognized ${matched.map((p) => p.name).join(", ")}`,
+        );
+      } else if (faces.some((f) => f.gender == null && f.status !== "known")) {
+        setRecognitionHint("Detecting boy / girl…");
+      } else {
+        setRecognitionHint(`Tracking ${faces.length} face(s)…`);
       }
     },
-    [people],
-  );
-
-  const removePending = useCallback((trackId: number) => {
-    const next = pendingFacesRef.current.filter((p) => p.trackId !== trackId);
-    pendingFacesRef.current = next;
-    setPendingFaces(next);
-  }, []);
-
-  const handleCreated = useCallback(
-    (person: Person, trackId: number) => {
-      dismissedTracksRef.current.add(trackId);
-      const samples = getTrackDescriptors(trackId);
-      const descriptors =
-        samples.length > 0
-          ? samples
-          : (() => {
-              const d = getTrackDescriptor(trackId);
-              return d ? [d] : [];
-            })();
-      if (descriptors.length > 0) {
-        registerEnrolledDescriptors(person.personId, descriptors);
-      }
-      setPeople((prev) =>
-        prev.some((p) => p.personId === person.personId)
-          ? prev
-          : [...prev, person],
-      );
-      removePending(trackId);
-    },
-    [removePending],
-  );
-
-  const handleCancel = useCallback(
-    (trackId: number) => {
-      dismissedTracksRef.current.add(trackId);
-      removePending(trackId);
-    },
-    [removePending],
+    [personForGender],
   );
 
   if (view === "quiz" && activePerson) {
@@ -216,27 +173,15 @@ export default function HomePage() {
       <div className="hud-stack">
         {recognizedPeople.length > 0 ? (
           recognizedPeople.map((person) => (
-            <HudCard key={person.personId} person={person} />
+            <HudCard
+              key={person.personId}
+              person={person}
+            />
           ))
         ) : (
           <HudCard person={null} />
         )}
       </div>
-
-      {pendingFaces.length > 0 && (
-        <div className="enroll-list">
-          {pendingFaces.map((face) => (
-            <AddPersonForm
-              key={face.trackId}
-              snapshot={face.snapshot}
-              descriptor={getTrackDescriptor(face.trackId) ?? face.descriptor}
-              descriptors={getTrackDescriptors(face.trackId)}
-              onCreated={(person) => handleCreated(person, face.trackId)}
-              onCancel={() => handleCancel(face.trackId)}
-            />
-          ))}
-        </div>
-      )}
 
       <div className="dock">
         <SessionControls
@@ -245,7 +190,7 @@ export default function HomePage() {
           speakerNames={
             people.length > 0
               ? people.map((p) => p.name)
-              : ["Ishaan", "Sanvi"]
+              : ["Ishaan Chandra", "Sanvi Kaushik"]
           }
         />
       </div>

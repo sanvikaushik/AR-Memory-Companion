@@ -1,7 +1,13 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { createPerson } from "@/lib/api";
+import { useEffect, useRef, useState } from "react";
+import { assignHardcodedFace } from "@/lib/api";
+import {
+  HARDCODED_BY_GENDER,
+  estimateGender,
+  registerEnrolledDescriptors,
+  type EstimatedGender,
+} from "@/lib/faceDetection";
 import type { Person } from "@/lib/types";
 
 type AddPersonFormProps = {
@@ -15,9 +21,8 @@ type AddPersonFormProps = {
 };
 
 /**
- * New-face overlay. Starts as a compact card next to the detected face;
- * clicking it expands into a form to add name / relationship / facts.
- * The captured descriptors are saved so future sessions recognize this person.
+ * Unknown-face card: estimates boy/girl, then assigns the face to the
+ * hardcoded person (Ishaan Chandra / Sanvi Kaushik).
  */
 export default function AddPersonForm({
   snapshot,
@@ -26,124 +31,62 @@ export default function AddPersonForm({
   onCreated,
   onCancel,
 }: AddPersonFormProps) {
-  const [expanded, setExpanded] = useState(false);
-  const [name, setName] = useState("");
-  const [relationship, setRelationship] = useState("");
-  const [factsText, setFactsText] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("Detecting…");
   const [error, setError] = useState<string | null>(null);
+  const startedRef = useRef(false);
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      const facts = factsText
-        .split("\n")
-        .map((f) => f.trim())
-        .filter(Boolean);
-      const person = await createPerson({
-        name,
-        relationship,
-        photo: snapshot,
-        facts,
-        conversationHistory: [],
-        spacedRetrievalState: {},
-        descriptor: descriptor ?? [],
-        descriptors: descriptors ?? [],
-      });
-      onCreated(person);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create person");
-    } finally {
-      setBusy(false);
-    }
-  }
+  useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
 
-  if (!expanded) {
-    return (
-      <aside
-        className="enroll-card"
-        role="button"
-        tabIndex={0}
-        onClick={() => setExpanded(true)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") setExpanded(true);
-        }}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={snapshot} alt="New face" className="enroll-card__avatar" />
-        <div className="enroll-card__body">
-          <h2>New person</h2>
-          <p className="muted">Tap to add details</p>
-        </div>
-        <button
-          type="button"
-          className="enroll-card__dismiss"
-          onClick={(e) => {
-            e.stopPropagation();
-            onCancel();
-          }}
-          aria-label="Dismiss"
-        >
-          ×
-        </button>
-      </aside>
-    );
-  }
+    void (async () => {
+      try {
+        const gender: EstimatedGender | null = await estimateGender(snapshot);
+        const assumed = HARDCODED_BY_GENDER[gender ?? "male"];
+        setStatus(`Saving as ${assumed.name}…`);
+
+        const samples =
+          descriptors && descriptors.length > 0
+            ? descriptors
+            : descriptor && descriptor.length > 0
+              ? [descriptor]
+              : [];
+        const primary = samples[0] ?? descriptor ?? [];
+
+        const person = await assignHardcodedFace(gender ?? "male", {
+          photo: snapshot,
+          descriptor: primary,
+          descriptors: samples,
+        });
+
+        if (samples.length > 0) {
+          registerEnrolledDescriptors(person.personId, samples);
+        }
+        onCreated(person);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to save person");
+        setStatus("Could not save");
+      }
+    })();
+  }, [snapshot, descriptor, descriptors, onCreated]);
 
   return (
-    <form className="add-person-form" onSubmit={handleSubmit}>
-      <div className="enroll-card__head">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={snapshot} alt="New face" className="enroll-card__avatar" />
-        <div>
-          <h2>New person</h2>
-          <p className="muted">Add their details</p>
-        </div>
+    <aside className="enroll-card">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={snapshot} alt="New face" className="enroll-card__avatar" />
+      <div className="enroll-card__body">
+        <h2>{status}</h2>
+        <p className="muted">Boy → Ishaan Chandra · Girl → Sanvi Kaushik</p>
+        {error && <p className="form-error">{error}</p>}
       </div>
-      <label>
-        Name
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. Grace"
-          autoFocus
-          required
-        />
-      </label>
-      <label>
-        Relationship
-        <input
-          value={relationship}
-          onChange={(e) => setRelationship(e.target.value)}
-          required
-          placeholder="e.g. daughter, neighbor"
-        />
-      </label>
-      <label>
-        Facts (one per line)
-        <textarea
-          value={factsText}
-          onChange={(e) => setFactsText(e.target.value)}
-          rows={3}
-          placeholder="Lives in Austin&#10;Loves gardening"
-        />
-      </label>
-      {error && <p className="form-error">{error}</p>}
-      <div className="form-actions">
-        <button
-          type="button"
-          className="ghost-btn"
-          onClick={() => setExpanded(false)}
-          disabled={busy}
-        >
-          Back
-        </button>
-        <button type="submit" disabled={busy}>
-          {busy ? "Saving…" : "Save person"}
-        </button>
-      </div>
-    </form>
+      <button
+        type="button"
+        className="enroll-card__dismiss"
+        onClick={onCancel}
+        aria-label="Dismiss"
+      >
+        ×
+      </button>
+    </aside>
   );
 }

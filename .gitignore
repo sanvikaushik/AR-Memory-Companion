@@ -16,6 +16,10 @@ backend/seed/*.jpg
 backend/seed/*.jpeg
 backend/seed/*.png
 backend/seed/*.webp
+backend/seed/*.heic
+backend/seed/*.HEIC
+backend/seed/*.heif
+backend/seed/.web_cache/
 
 # Local conversation memory fallback (when Mongo isn't configured)
 backend/data/conversations.json

@@ -77,6 +77,7 @@ def main() -> None:
                         "$set": {
                             "relationship": relationship,
                             "photo": photo,
+                            "photos": [photo],
                             "facts": facts,
                         }
                     },
@@ -88,9 +89,12 @@ def main() -> None:
                     "name": name,
                     "relationship": relationship,
                     "photo": photo,
+                    "photos": [photo],
                     "facts": facts,
                     "conversationHistory": [],
                     "spacedRetrievalState": {},
+                    "descriptor": [],
+                    "descriptors": [],
                 }
                 collection.insert_one(doc)
                 print(f"created: {name} ({doc['personId']})")

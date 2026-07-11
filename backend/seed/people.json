@@ -1,14 +1,20 @@
 [
   {
-    "name": "Person A",
-    "relationship": "family",
+    "name": "Ishaan Chandra",
+    "relationship": "friend",
     "photoFile": "person_a.jpg",
-    "facts": ["Replace with real facts"]
+    "facts": [
+      "Software Engineer Intern at Ericsson (Ottawa)",
+      "Studies Computer Science, Machine Learning and AI at Carleton University"
+    ]
   },
   {
-    "name": "Person B",
+    "name": "Sanvi Kaushik",
     "relationship": "friend",
     "photoFile": "person_b.jpg",
-    "facts": ["Replace with real facts"]
+    "facts": [
+      "Software Developer / SWE Intern at Ericsson (Ottawa)",
+      "Previously Software Development Intern at BlackBerry"
+    ]
   }
 ]

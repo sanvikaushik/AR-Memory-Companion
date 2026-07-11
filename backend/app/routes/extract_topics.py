@@ -32,7 +32,7 @@ async def extract_topics(payload: ExtractTopicsRequest) -> ExtractTopicsResponse
     try:
         analysis = await analyze_conversation(
             payload.transcript,
-            known_speakers=payload.speakers or ["Ishaan", "Sanvi"],
+            known_speakers=payload.speakers or ["Ishaan Chandra", "Sanvi Kaushik"],
         )
     except TranscriptionError as err:
         raise HTTPException(status_code=502, detail=str(err)) from err

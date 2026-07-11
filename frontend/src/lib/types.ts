@@ -35,7 +35,13 @@ export type Person = {
   personId: string;
   name: string;
   relationship: string;
+  /** LinkedIn-style headline for the HUD overlay. */
+  headline?: string;
+  linkedinUrl?: string;
+  /** Primary / HUD avatar (usually photos[0]). */
   photo: string;
+  /** Camera-roll + enrollment crops stored as data URLs. */
+  photos?: string[];
   facts: string[];
   conversationHistory: ConversationEntry[];
   spacedRetrievalState: Record<string, unknown>;
@@ -88,6 +94,9 @@ export type TrackedFace = {
   distance: number | null;
   /** Base64 crop, only populated for unknown faces. */
   snapshot: string | null;
+  /** Live ageGenderNet estimate when available. */
+  gender?: "male" | "female" | null;
+  genderProbability?: number | null;
 };
 
 /** Callback for the multi-face detection loop. */

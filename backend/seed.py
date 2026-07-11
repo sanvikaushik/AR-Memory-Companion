@@ -22,6 +22,7 @@ SAMPLE_PERSON = {
     "name": "Grace Ramirez",
     "relationship": "daughter",
     "photo": "",
+    "photos": [],
     "facts": [
         "Lives in Austin, TX",
         "Loves gardening and jazz",
@@ -30,6 +31,7 @@ SAMPLE_PERSON = {
     "conversationHistory": [],
     "spacedRetrievalState": {},
     "descriptor": [],
+    "descriptors": [],
 }
 
 

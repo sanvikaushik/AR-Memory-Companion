@@ -57,7 +57,7 @@ export default function SessionControls({
         const known =
           speakerNames && speakerNames.length > 0
             ? speakerNames
-            : ["Ishaan", "Sanvi"];
+            : ["Ishaan Chandra", "Sanvi Kaushik"];
         const result = await transcribeAudio(
           blob,
           sessionIdRef.current ?? undefined,

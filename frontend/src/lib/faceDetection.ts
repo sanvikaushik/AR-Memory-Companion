@@ -2,7 +2,8 @@
  * Live multi-face detection + matching (face-api.js TinyFaceDetector).
  *
  * Product flow:
- * 1. Enroll known people from camera-roll photos (Person.photo) into a FaceMatcher.
+ * 1. Enroll known people from camera-roll photos (Person.photos / Person.photo)
+ *    into a FaceMatcher.
  * 2. Live loop: detect ALL faces every frame → padded oval boxes → track them
  *    across frames (IoU) → run descriptor matching per track on a throttle.
  * 3. Emit an array of TrackedFace for HUD overlays + profile cards.
@@ -57,6 +58,12 @@ type FaceApi = typeof import("face-api.js");
 
 type PixelBox = { x: number; y: number; width: number; height: number };
 
+/** Hackathon mapping: boy → Ishaan Chandra, girl → Sanvi Kaushik. */
+export type EstimatedGender = "male" | "female";
+
+/** Min ageGenderNet confidence before we trust boy/girl assignment. */
+const GENDER_CONFIDENCE = 0.65;
+
 type Track = {
   id: number;
   /** Padded, normalized oval box for rendering. */
@@ -67,6 +74,8 @@ type Track = {
   personId: string | null;
   distance: number | null;
   snapshot: string | null;
+  gender: EstimatedGender | null;
+  genderProbability: number | null;
   lastSeen: number;
   lastRecognizedAt: number;
   /** Consecutive recognition passes without a confident match (hysteresis). */
@@ -161,6 +170,7 @@ export async function loadFaceModels(): Promise<void> {
     // net, which keeps recognition descriptors stable as the head turns.
     api.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
     api.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+    api.nets.ageGenderNet.loadFromUri(MODEL_URL),
   ]);
   modelsLoaded = true;
 }
@@ -192,7 +202,7 @@ function addDescriptorsToStore(personId: string, descriptors: number[][]): void 
  * Build matcher index from enrolled people.
  *
  * Prefers the stored `descriptors` set (multiple angles). Falls back to a
- * single stored `descriptor`, then to detecting from the photo.
+ * single stored `descriptor`, then to detecting from every stored photo.
  */
 export async function enrollPeople(people: Person[]): Promise<void> {
   if (!modelsLoaded) {
@@ -217,24 +227,118 @@ export async function enrollPeople(people: Person[]): Promise<void> {
       continue;
     }
 
-    // Fallback: detect a descriptor from the stored photo.
-    if (!person.photo || person.photo.startsWith("data:image/svg")) {
-      continue;
+    // Fallback: detect descriptors from all stored camera-roll photos.
+    const gallery = personPhotos(person);
+    const fromPhotos: number[][] = [];
+    for (const src of gallery) {
+      try {
+        const descriptor = await descriptorFromImageSrc(api, options, src);
+        if (descriptor) fromPhotos.push(descriptor);
+      } catch (err) {
+        console.warn(`[faceDetection] enroll failed for ${person.personId}`, err);
+      }
     }
-    try {
-      const img = await api.fetchImage(person.photo);
-      const detection = await api
-        .detectSingleFace(img, options)
-        .withFaceLandmarks()
-        .withFaceDescriptor();
-      if (!detection) continue;
-      addDescriptorsToStore(person.personId, [Array.from(detection.descriptor)]);
-    } catch (err) {
-      console.warn(`[faceDetection] enroll failed for ${person.personId}`, err);
+    if (fromPhotos.length > 0) {
+      addDescriptorsToStore(person.personId, fromPhotos);
     }
   }
 
   rebuildMatcher(api);
+}
+
+/** Unique photo gallery for a person (primary + photos[]). */
+export function personPhotos(person: Person): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const src of [person.photo, ...(person.photos ?? [])]) {
+    if (!src || src.startsWith("data:image/svg") || seen.has(src)) continue;
+    seen.add(src);
+    out.push(src);
+  }
+  return out;
+}
+
+/** Detect a 128-d descriptor from an image data URL / remote URL. */
+export async function descriptorFromImage(
+  src: string,
+): Promise<number[] | null> {
+  if (!modelsLoaded) {
+    await loadFaceModels();
+  }
+  const api = await getFaceApi();
+  return descriptorFromImageSrc(api, detectorOptions(api), src);
+}
+
+async function descriptorFromImageSrc(
+  api: FaceApi,
+  options: ReturnType<typeof detectorOptions>,
+  src: string,
+): Promise<number[] | null> {
+  const img = await api.fetchImage(src);
+  const detection = await api
+    .detectSingleFace(img, options)
+    .withFaceLandmarks()
+    .withFaceDescriptor();
+  if (!detection) return null;
+  return Array.from(detection.descriptor);
+}
+
+/** Hackathon mapping: boy → Ishaan Chandra, girl → Sanvi Kaushik. */
+export const HARDCODED_BY_GENDER: Record<
+  EstimatedGender,
+  { personId: string; name: string; relationship: string }
+> = {
+  male: {
+    personId: "ishaan-chandra",
+    name: "Ishaan Chandra",
+    relationship: "friend",
+  },
+  female: {
+    personId: "sanvi-kaushik",
+    name: "Sanvi Kaushik",
+    relationship: "friend",
+  },
+};
+
+function genderFromNet(
+  gender: string | undefined,
+  probability: number | undefined,
+): { gender: EstimatedGender; probability: number } | null {
+  if (gender !== "male" && gender !== "female") return null;
+  const p = typeof probability === "number" ? probability : 0;
+  if (p < GENDER_CONFIDENCE) return null;
+  return { gender, probability: p };
+}
+
+/**
+ * Estimate binary gender from a face crop / photo.
+ * Prefer live-frame gender from the detection loop when available.
+ */
+export async function estimateGender(
+  src: string,
+): Promise<EstimatedGender | null> {
+  if (!modelsLoaded) {
+    await loadFaceModels();
+  }
+  try {
+    const api = await getFaceApi();
+    const img = await api.fetchImage(src);
+    // Looser detector for tight face crops.
+    const options = new api.TinyFaceDetectorOptions({
+      inputSize: 224,
+      scoreThreshold: 0.3,
+    });
+    const result = await api
+      .detectSingleFace(img, options)
+      .withFaceLandmarks()
+      .withAgeAndGender();
+    if (!result) return null;
+    const parsed = genderFromNet(result.gender, result.genderProbability);
+    return parsed?.gender ?? null;
+  } catch (err) {
+    console.warn("[faceDetection] gender estimate failed", err);
+    return null;
+  }
 }
 
 /**
@@ -425,25 +529,6 @@ export function getTrackSampleCount(trackId: number): number {
   return trackDescriptorSamples.get(trackId)?.length ?? 0;
 }
 
-function cropSnapshot(video: HTMLVideoElement, box: FaceBox): string {
-  const canvas = document.createElement("canvas");
-  const size = 256;
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d");
-  if (!ctx || !video.videoWidth) {
-    return "";
-  }
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
-  const sx = box.x * video.videoWidth;
-  const sy = box.y * video.videoHeight;
-  const sw = box.width * video.videoWidth;
-  const sh = box.height * video.videoHeight;
-  ctx.drawImage(video, sx, sy, sw, sh, 0, 0, size, size);
-  return canvas.toDataURL("image/jpeg", 0.88);
-}
-
 /** Exponential smoothing of a box toward a new observation (anti-jitter). */
 function smoothBox(prev: PixelBox, next: PixelBox, alpha = 0.45): PixelBox {
   return {
@@ -521,6 +606,8 @@ class FaceTracker {
         personId: null,
         distance: null,
         snapshot: null,
+        gender: null,
+        genderProbability: null,
         lastSeen: now,
         lastRecognizedAt: 0,
         missCount: 0,
@@ -560,6 +647,8 @@ class FaceTracker {
         personId: t.personId,
         distance: t.distance,
         snapshot: t.snapshot,
+        gender: t.gender,
+        genderProbability: t.genderProbability,
       }));
   }
 
@@ -622,6 +711,7 @@ export function startDetectionLoop(
         const results = await api
           .detectAllFaces(video, options)
           .withFaceLandmarks()
+          .withAgeAndGender()
           .withFaceDescriptors();
         if (cancelled) return;
 
@@ -650,8 +740,19 @@ export function startDetectionLoop(
         };
 
         for (const { track, index } of pairs) {
-          const frameDescriptor = Array.from(results[index].descriptor);
+          const result = results[index];
+          const frameDescriptor = Array.from(result.descriptor);
           addDescriptorSample(track.id, frameDescriptor);
+
+          const genderHit = genderFromNet(
+            result.gender,
+            result.genderProbability,
+          );
+          if (genderHit) {
+            track.gender = genderHit.gender;
+            track.genderProbability = genderHit.probability;
+          }
+
           // Match on the CURRENT frame (the current pose), not an average of
           // recent frames — averaging blurs together different angles when the
           // head is moving and pushes the distance past the threshold.
@@ -689,8 +790,8 @@ export function startDetectionLoop(
             track.personId = null;
             track.distance = best ? best.distance : null;
             track.missCount = 0;
-            // Refresh the crop so the saved photo reflects the latest frame.
-            track.snapshot = cropSnapshot(video, track.box);
+            // No live photo capture — users add profile / camera-roll photos manually.
+            track.snapshot = null;
           }
         }
       } else {

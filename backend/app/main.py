@@ -9,7 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=True)
 
 from app.db.mongo import close_client
-from app.routes import conversations, extract_topics, people, transcribe
+from app.routes import conversations, extract_topics, people, seed, transcribe
+from app.services.hardcoded_people import ensure_hardcoded_people
 from app.services.transcribe import _groq_api_key
 
 
@@ -18,6 +19,11 @@ async def lifespan(_app: FastAPI):
     # Warm / repair key so transcription doesn't see a stale placeholder.
     try:
         _groq_api_key()
+    except Exception:
+        pass
+    # Always keep Ishaan + Sanvi in the people collection.
+    try:
+        await ensure_hardcoded_people()
     except Exception:
         pass
     yield
@@ -46,6 +52,7 @@ app.include_router(people.router, prefix="/api")
 app.include_router(conversations.router, prefix="/api")
 app.include_router(transcribe.router, prefix="/api")
 app.include_router(extract_topics.router, prefix="/api")
+app.include_router(seed.router, prefix="/api")
 
 
 @app.get("/health")
