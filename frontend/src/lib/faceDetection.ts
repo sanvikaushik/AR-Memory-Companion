@@ -39,6 +39,13 @@ const KNOWN_HYSTERESIS_MISSES = 4;
 /** Min gap between persisting learned descriptors for one person (ms). */
 const LEARN_PERSIST_MS = 4000;
 
+/**
+ * Keep drawing a track for this long after its last detection, even on frames
+ * where the detector momentarily misses it. Prevents overlays from flickering
+ * on/off ("face found / no face found") between frames.
+ */
+const VISIBLE_GRACE_MS = 400;
+
 /** Minimum IoU to consider a new detection the same face as an existing track. */
 const IOU_MATCH_THRESHOLD = 0.25;
 
@@ -404,6 +411,16 @@ function cropSnapshot(video: HTMLVideoElement, box: FaceBox): string {
   return canvas.toDataURL("image/jpeg", 0.88);
 }
 
+/** Exponential smoothing of a box toward a new observation (anti-jitter). */
+function smoothBox(prev: PixelBox, next: PixelBox, alpha = 0.45): PixelBox {
+  return {
+    x: prev.x + (next.x - prev.x) * alpha,
+    y: prev.y + (next.y - prev.y) * alpha,
+    width: prev.width + (next.width - prev.width) * alpha,
+    height: prev.height + (next.height - prev.height) * alpha,
+  };
+}
+
 function iou(a: PixelBox, b: PixelBox): number {
   const ax2 = a.x + a.width;
   const ay2 = a.y + a.height;
@@ -452,7 +469,8 @@ class FaceTracker {
       usedDetections.add(d);
       usedTracks.add(t);
       const track = this.tracks[t];
-      const raw = detections[d];
+      // Smooth the box toward the new detection to remove per-frame jitter.
+      const raw = smoothBox(track.rawBox, detections[d]);
       track.rawBox = raw;
       track.box = toPaddedFaceBox(raw, video.videoWidth, video.videoHeight);
       track.lastSeen = now;
@@ -494,10 +512,14 @@ class FaceTracker {
     this.tracks = kept;
   }
 
-  /** Tracks seen in the current frame, as emittable TrackedFace values. */
+  /**
+   * Tracks recently seen (within the grace window) as emittable values.
+   * Using a grace window instead of "seen this exact frame" prevents overlays
+   * from flickering when the detector misses a face on an occasional frame.
+   */
   visible(now: number): TrackedFace[] {
     return this.tracks
-      .filter((t) => t.lastSeen === now)
+      .filter((t) => now - t.lastSeen <= VISIBLE_GRACE_MS)
       .map((t) => ({
         trackId: t.id,
         box: t.box,

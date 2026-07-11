@@ -177,56 +177,70 @@ export default function HomePage() {
     [removePending],
   );
 
-  return (
-    <main className="app">
-      <header className="app-header">
-        <h1>AR Memory Companion</h1>
-        <p className="muted">{apiStatus}</p>
-        <p className="muted">{recognitionHint}</p>
-        <div className="toolbar">
-          <button
-            type="button"
-            onClick={() => setView(view === "live" ? "quiz" : "live")}
-            disabled={!activePerson}
-          >
-            {view === "live" ? "Open quiz" : "Back to live"}
-          </button>
-        </div>
-      </header>
-
-      {view === "quiz" && activePerson ? (
-        <QuizScreen person={activePerson} onDone={() => setView("live")} />
-      ) : (
-        <div className="live-layout">
-          <CameraFeed onFaces={onFaces} people={people} />
-          {pendingFaces.length > 0 && (
-            <div className="enroll-list">
-              {pendingFaces.map((face) => (
-                <AddPersonForm
-                  key={face.trackId}
-                  snapshot={face.snapshot}
-                  descriptor={
-                    getTrackDescriptor(face.trackId) ?? face.descriptor
-                  }
-                  descriptors={getTrackDescriptors(face.trackId)}
-                  onCreated={(person) => handleCreated(person, face.trackId)}
-                  onCancel={() => handleCancel(face.trackId)}
-                />
-              ))}
-            </div>
-          )}
-          <div className="hud-stack">
-            {recognizedPeople.length > 0 ? (
-              recognizedPeople.map((person) => (
-                <HudCard key={person.personId} person={person} />
-              ))
-            ) : (
-              <HudCard person={null} />
-            )}
+  if (view === "quiz" && activePerson) {
+    return (
+      <main className="app">
+        <header className="app-header">
+          <h1>AR Memory Companion</h1>
+          <div className="toolbar">
+            <button type="button" onClick={() => setView("live")}>
+              Back to live
+            </button>
           </div>
-          <SessionControls personId={activePerson?.personId} />
+        </header>
+        <QuizScreen person={activePerson} onDone={() => setView("live")} />
+      </main>
+    );
+  }
+
+  return (
+    <div className="stage">
+      <CameraFeed onFaces={onFaces} people={people} />
+
+      <div className="top-bar">
+        <div className="top-bar__info">
+          <h1>AR Memory Companion</h1>
+          <p className="top-bar__hint">{recognitionHint}</p>
+          <p className="top-bar__status">{apiStatus}</p>
+        </div>
+        <button
+          type="button"
+          className="ghost-btn"
+          onClick={() => setView("quiz")}
+          disabled={!activePerson}
+        >
+          Open quiz
+        </button>
+      </div>
+
+      <div className="hud-stack">
+        {recognizedPeople.length > 0 ? (
+          recognizedPeople.map((person) => (
+            <HudCard key={person.personId} person={person} />
+          ))
+        ) : (
+          <HudCard person={null} />
+        )}
+      </div>
+
+      {pendingFaces.length > 0 && (
+        <div className="enroll-list">
+          {pendingFaces.map((face) => (
+            <AddPersonForm
+              key={face.trackId}
+              snapshot={face.snapshot}
+              descriptor={getTrackDescriptor(face.trackId) ?? face.descriptor}
+              descriptors={getTrackDescriptors(face.trackId)}
+              onCreated={(person) => handleCreated(person, face.trackId)}
+              onCancel={() => handleCancel(face.trackId)}
+            />
+          ))}
         </div>
       )}
-    </main>
+
+      <div className="dock">
+        <SessionControls personId={activePerson?.personId} />
+      </div>
+    </div>
   );
 }
