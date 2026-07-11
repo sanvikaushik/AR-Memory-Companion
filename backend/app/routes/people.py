@@ -18,8 +18,8 @@ router = APIRouter(prefix="/people", tags=["people"])
 # Max L2 distance between 128-d embeddings to treat two faces as the same
 # person. Matches the frontend FaceMatcher threshold.
 DEDUP_DISTANCE = 0.6
-# Cap reference embeddings stored per person.
-MAX_DESCRIPTORS = 24
+# Cap reference embeddings stored per person (multiple angles / lighting).
+MAX_DESCRIPTORS = 48
 
 
 def _doc_to_person(doc: dict[str, Any]) -> Person:
