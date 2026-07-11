@@ -2,7 +2,17 @@
 
 Hackathon MVP: AR "memory companion" for people with dementia. Glasses (simulated via webcam) recognize people, show a HUD profile card, transcribe conversations, extract topics with an LLM, and quiz the wearer using spaced retrieval.
 
-This monorepo scaffolds the full request/response loop. Face-api.js matching, Groq Whisper, and Gemini extraction are **stubs** so three people can implement them in parallel without editing the same files.
+### Product UX (wearer)
+
+1. Live camera sees a face → **box around the face**
+2. Face is matched against people enrolled from the **camera roll** (not typed in live)
+3. On match → **HUD overlay** (name / relationship / facts) appears automatically
+4. Conversation can be transcribed; topics extracted afterward
+5. Later: spaced-retrieval quiz from the same person records
+
+There is **no** live "Add person" form in the wearer flow. Enroll faces via `backend/seed/` + `python -m scripts.seed_people`.
+
+This monorepo scaffolds the request/response loop. Face-api.js matching, camera-roll enrollment, Groq Whisper, and Gemini extraction are **stubs** so three people can implement them in parallel without editing the same files.
 
 ## Repo layout
 
@@ -95,17 +105,37 @@ npm run dev
 
 Open http://localhost:3000
 
+### Seed two people for live face matching (no UI enroll)
+
+1. Put clear front-facing photos in `backend/seed/` (e.g. `person_a.jpg`, `person_b.jpg`).
+2. Edit `backend/seed/people.json` with their names, relationships, facts, and filenames.
+3. Seed MongoDB:
+
+```bash
+cd backend
+source .venv/bin/activate
+python -m scripts.seed_people
+```
+
+4. Reload the frontend — it loads people from `GET /api/people` and indexes faces. Live UI stays detection-only (oval + HUD).
+
 ### Verify end-to-end
 
 1. Start backend on `:8000` (venv uvicorn), confirm with `curl http://127.0.0.1:8000/health`.
 2. Start frontend on `:3000`.
-3. On the home page, click **Seed dummy person** — creates a record in MongoDB via `POST /api/people`.
-4. Click **Refresh people** — confirms `GET /api/people`.
-5. HUD card shows the seeded person; **Open quiz** exercises `QuizScreen`.
-6. **Start recording** / **Stop & process** hits stub `/api/transcribe` then `/api/extract-topics`.
-7. After ~1.5s the face stub emits an `unknown` event so you can try **Add person**.
+3. Allow webcam — you should see the live feed and a **stub face box** after ~1.5s.
+4. HUD stays empty until a **known** match (camera-roll matching not implemented yet).
+5. **Start recording** / **Stop & process** hits stub `/api/transcribe` then `/api/extract-topics`.
 
-Allow webcam/mic when the browser prompts (camera feed and session recording).
+Dev-only Mongo check (not part of wearer UX):
+
+```bash
+curl -s http://127.0.0.1:8000/api/people \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Alex Rivera","relationship":"grandchild","photo":"https://example.com/alex.jpg","facts":["Visits Sundays"],"conversationHistory":[],"spacedRetrievalState":{}}'
+```
+
+Allow mic when testing session recording.
 
 ## Person document shape
 
@@ -128,10 +158,12 @@ Stored in MongoDB and mirrored in `frontend/src/lib/types.ts`:
 ## Face detection events
 
 ```ts
-{ status: "known", personId: string }
+{ status: "known", personId: string, box: { x, y, width, height } }  // 0–1 relative
 // or
-{ status: "unknown", snapshot: string }  // base64 image
+{ status: "unknown", snapshot: string, box: { x, y, width, height } }
 ```
+
+Live UI draws `box` on the camera feed and shows the HUD only for `known` matches.
 
 ## Environment variables
 

@@ -1,0 +1,14 @@
+[
+  {
+    "name": "Person A",
+    "relationship": "family",
+    "photoFile": "person_a.jpg",
+    "facts": ["Replace with real facts"]
+  },
+  {
+    "name": "Person B",
+    "relationship": "friend",
+    "photoFile": "person_b.jpg",
+    "facts": ["Replace with real facts"]
+  }
+]
