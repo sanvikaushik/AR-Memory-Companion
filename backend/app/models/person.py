@@ -7,6 +7,8 @@ class ConversationEntry(BaseModel):
     date: str
     topics: list[str]
     sessionId: str
+    summary: str = ""
+    personName: str = ""
 
 
 class Person(BaseModel):

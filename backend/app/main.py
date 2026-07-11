@@ -1,14 +1,25 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+# Load backend/.env before importing routes that read env vars.
+load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=True)
+
 from app.db.mongo import close_client
-from app.routes import extract_topics, people, transcribe
+from app.routes import conversations, extract_topics, people, transcribe
+from app.services.transcribe import _groq_api_key
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # Warm / repair key so transcription doesn't see a stale placeholder.
+    try:
+        _groq_api_key()
+    except Exception:
+        pass
     yield
     await close_client()
 
@@ -32,6 +43,7 @@ app.add_middleware(
 )
 
 app.include_router(people.router, prefix="/api")
+app.include_router(conversations.router, prefix="/api")
 app.include_router(transcribe.router, prefix="/api")
 app.include_router(extract_topics.router, prefix="/api")
 

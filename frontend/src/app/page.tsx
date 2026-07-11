@@ -239,7 +239,15 @@ export default function HomePage() {
       )}
 
       <div className="dock">
-        <SessionControls personId={activePerson?.personId} />
+        <SessionControls
+          personId={activePerson?.personId}
+          personName={activePerson?.name}
+          speakerNames={
+            people.length > 0
+              ? people.map((p) => p.name)
+              : ["Ishaan", "Sanvi"]
+          }
+        />
       </div>
     </div>
   );

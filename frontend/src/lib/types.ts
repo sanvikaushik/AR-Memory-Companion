@@ -2,6 +2,33 @@ export type ConversationEntry = {
   date: string;
   topics: string[];
   sessionId: string;
+  summary?: string;
+  personName?: string;
+};
+
+export type SpeakerTurn = {
+  speaker: string;
+  text: string;
+};
+
+export type SpeakerTakeaway = {
+  speaker: string;
+  points: string[];
+};
+
+export type ConversationMemory = {
+  sessionId: string;
+  personId: string;
+  personName: string;
+  date: string;
+  place?: string | null;
+  summary: string;
+  topics: string[];
+  facts: string[];
+  turns: SpeakerTurn[];
+  speakerTakeaways: SpeakerTakeaway[];
+  cues: string[];
+  emotionalTone?: string | null;
 };
 
 export type Person = {
@@ -69,16 +96,25 @@ export type FacesCallback = (faces: TrackedFace[]) => void;
 export type TranscribeResponse = {
   text: string;
   sessionId: string | null;
+  turns: SpeakerTurn[];
+  summary?: string;
+  topics?: string[];
+  facts?: string[];
+  speakerTakeaways?: SpeakerTakeaway[];
+  saved?: boolean;
+  storage?: string | null;
 };
 
 export type ExtractTopicsRequest = {
   transcript: string;
   personId?: string | null;
   sessionId?: string | null;
+  speakers?: string[];
 };
 
 export type ExtractTopicsResponse = {
   topics: string[];
   facts: string[];
+  summary?: string;
   sessionId: string | null;
 };

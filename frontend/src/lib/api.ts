@@ -1,4 +1,5 @@
 import type {
+  ConversationMemory,
   ExtractTopicsRequest,
   ExtractTopicsResponse,
   Person,
@@ -76,16 +77,34 @@ export async function appendDescriptor(
 export async function transcribeAudio(
   audio: Blob,
   sessionId?: string,
+  speakers?: string[],
+  person?: { personId?: string | null; personName?: string | null },
 ): Promise<TranscribeResponse> {
   const form = new FormData();
   form.append("audio", audio, "recording.webm");
   if (sessionId) {
     form.append("sessionId", sessionId);
   }
+  if (speakers?.length) {
+    form.append("speakers", JSON.stringify(speakers));
+  }
+  if (person?.personId) {
+    form.append("personId", person.personId);
+  }
+  if (person?.personName) {
+    form.append("personName", person.personName);
+  }
   return request<TranscribeResponse>("/api/transcribe", {
     method: "POST",
     body: form,
   });
+}
+
+export async function listConversations(
+  personId?: string,
+): Promise<ConversationMemory[]> {
+  const qs = personId ? `?personId=${encodeURIComponent(personId)}` : "";
+  return request<ConversationMemory[]>(`/api/conversations${qs}`);
 }
 
 export async function extractTopics(
