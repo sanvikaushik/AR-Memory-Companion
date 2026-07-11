@@ -38,14 +38,33 @@ cp .env.example .env
 # Edit .env — set MONGODB_URI (and later GROQ_API_KEY, GEMINI_API_KEY)
 ```
 
-Run the API (from `backend/`, with venv activated):
+Run the API **from `backend/` with the venv activated** (required — a system/Homebrew `uvicorn` will miss packages like `motor`):
 
 ```bash
+cd backend
+source .venv/bin/activate
+which uvicorn                      # should be .../backend/.venv/bin/uvicorn
 uvicorn app.main:app --reload --port 8000
 ```
 
-- Health: http://localhost:8000/health
-- Interactive docs: http://localhost:8000/docs
+Or without activating:
+
+```bash
+cd backend
+.venv/bin/uvicorn app.main:app --reload --port 8000
+```
+
+Confirm it’s up (expect `{"status":"ok"}`):
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+- Health: http://127.0.0.1:8000/health
+- Interactive docs: http://127.0.0.1:8000/docs
+
+If you see `ModuleNotFoundError: No module named 'motor'`, you’re not using the project venv — re-run with `source .venv/bin/activate` or `.venv/bin/uvicorn ...`.
+If the browser shows connection timed out / refused, nothing is listening on `:8000` — start the API first, then hit `/health`.
 
 ### People API
 
@@ -78,12 +97,13 @@ Open http://localhost:3000
 
 ### Verify end-to-end
 
-1. Start backend on `:8000`, then frontend on `:3000`.
-2. On the home page, click **Seed dummy person** — creates a record in MongoDB via `POST /api/people`.
-3. Click **Refresh people** — confirms `GET /api/people`.
-4. HUD card shows the seeded person; **Open quiz** exercises `QuizScreen`.
-5. **Start recording** / **Stop & process** hits stub `/api/transcribe` then `/api/extract-topics`.
-6. After ~1.5s the face stub emits an `unknown` event so you can try **Add person**.
+1. Start backend on `:8000` (venv uvicorn), confirm with `curl http://127.0.0.1:8000/health`.
+2. Start frontend on `:3000`.
+3. On the home page, click **Seed dummy person** — creates a record in MongoDB via `POST /api/people`.
+4. Click **Refresh people** — confirms `GET /api/people`.
+5. HUD card shows the seeded person; **Open quiz** exercises `QuizScreen`.
+6. **Start recording** / **Stop & process** hits stub `/api/transcribe` then `/api/extract-topics`.
+7. After ~1.5s the face stub emits an `unknown` event so you can try **Add person**.
 
 Allow webcam/mic when the browser prompts (camera feed and session recording).
 
