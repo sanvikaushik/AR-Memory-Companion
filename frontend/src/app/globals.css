@@ -1,0 +1,185 @@
+:root {
+  --bg: #0f1419;
+  --panel: #1a222c;
+  --text: #e8eef4;
+  --muted: #8fa3b5;
+  --accent: #3d9a7a;
+  --danger: #c45c5c;
+  --border: #2a3542;
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(ellipse at top, #1a2836 0%, var(--bg) 55%);
+  color: var(--text);
+}
+
+.app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+.app-header h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.75rem;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+button {
+  background: var(--accent);
+  color: #04120c;
+  border: none;
+  padding: 0.5rem 0.9rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.live-layout {
+  position: relative;
+  margin-top: 1.25rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.camera-feed {
+  position: relative;
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+  min-height: 240px;
+}
+
+.camera-video {
+  width: 100%;
+  display: block;
+  max-height: 420px;
+  object-fit: cover;
+}
+
+.camera-status,
+.camera-error {
+  position: absolute;
+  inset: auto 1rem 1rem;
+  margin: 0;
+}
+
+.camera-error {
+  color: var(--danger);
+}
+
+.hud-card {
+  position: fixed;
+  top: 1.25rem;
+  right: 1.25rem;
+  width: min(280px, calc(100vw - 2rem));
+  background: rgba(26, 34, 44, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+  backdrop-filter: blur(8px);
+  z-index: 20;
+}
+
+.hud-card h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.25rem;
+}
+
+.relationship {
+  margin: 0 0 0.75rem;
+  color: var(--accent);
+}
+
+.hud-card ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.add-person-form,
+.quiz-screen,
+.session-controls,
+.people-list {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+}
+
+.add-person-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.add-person-form label,
+.quiz-screen label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+
+input,
+textarea {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 0.5rem;
+}
+
+.snapshot,
+.quiz-photo {
+  width: 120px;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--border);
+}
+
+.form-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.form-error {
+  color: var(--danger);
+  margin: 0;
+}
+
+.people-list ul {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.people-list button {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}

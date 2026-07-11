@@ -1,0 +1,131 @@
+# AR Memory Companion
+
+Hackathon MVP: AR "memory companion" for people with dementia. Glasses (simulated via webcam) recognize people, show a HUD profile card, transcribe conversations, extract topics with an LLM, and quiz the wearer using spaced retrieval.
+
+This monorepo scaffolds the full request/response loop. Face-api.js matching, Groq Whisper, and Gemini extraction are **stubs** so three people can implement them in parallel without editing the same files.
+
+## Repo layout
+
+```
+/frontend          Next.js (App Router) + TypeScript
+/backend           FastAPI + MongoDB Atlas
+```
+
+### Who owns what (parallel work)
+
+| Person | Implement in these files only |
+|--------|-------------------------------|
+| Face recognition | `frontend/src/lib/faceDetection.ts`, `frontend/src/components/CameraFeed.tsx` |
+| Speech + topics | `backend/app/routes/transcribe.py`, `backend/app/routes/extract_topics.py`, `frontend/src/components/SessionControls.tsx` |
+| Quiz / spaced retrieval | `frontend/src/components/QuizScreen.tsx`, person `spacedRetrievalState` via `people` API |
+
+Shared contracts (touch carefully): `frontend/src/lib/types.ts`, `backend/app/models/person.py`, `frontend/src/lib/api.ts`.
+
+## Prerequisites
+
+- Node.js 20+
+- Python 3.11+
+- A MongoDB Atlas cluster (connection string in `.env`)
+
+## Backend setup
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env
+# Edit .env — set MONGODB_URI (and later GROQ_API_KEY, GEMINI_API_KEY)
+```
+
+Run the API (from `backend/`, with venv activated):
+
+```bash
+uvicorn app.main:app --reload --port 8000
+```
+
+- Health: http://localhost:8000/health
+- Interactive docs: http://localhost:8000/docs
+
+### People API
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/people` | List all people |
+| GET | `/api/people/{personId}` | Get one person |
+| POST | `/api/people` | Create person (`personId` auto-generated) |
+| PUT | `/api/people/{personId}` | Partial update |
+| DELETE | `/api/people/{personId}` | Delete |
+
+Stub routes (safe to call now; return placeholder payloads):
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/transcribe` | Multipart `audio` file → stub transcript |
+| POST | `/api/extract-topics` | JSON `{ transcript, personId?, sessionId? }` → stub topics |
+
+## Frontend setup
+
+```bash
+cd frontend
+cp .env.local.example .env.local
+# NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+npm install
+npm run dev
+```
+
+Open http://localhost:3000
+
+### Verify end-to-end
+
+1. Start backend on `:8000`, then frontend on `:3000`.
+2. On the home page, click **Seed dummy person** — creates a record in MongoDB via `POST /api/people`.
+3. Click **Refresh people** — confirms `GET /api/people`.
+4. HUD card shows the seeded person; **Open quiz** exercises `QuizScreen`.
+5. **Start recording** / **Stop & process** hits stub `/api/transcribe` then `/api/extract-topics`.
+6. After ~1.5s the face stub emits an `unknown` event so you can try **Add person**.
+
+Allow webcam/mic when the browser prompts (camera feed and session recording).
+
+## Person document shape
+
+Stored in MongoDB and mirrored in `frontend/src/lib/types.ts`:
+
+```json
+{
+  "personId": "string",
+  "name": "string",
+  "relationship": "string",
+  "photo": "string",
+  "facts": ["string"],
+  "conversationHistory": [
+    { "date": "string", "topics": ["string"], "sessionId": "string" }
+  ],
+  "spacedRetrievalState": {}
+}
+```
+
+## Face detection events
+
+```ts
+{ status: "known", personId: string }
+// or
+{ status: "unknown", snapshot: string }  // base64 image
+```
+
+## Environment variables
+
+**Backend** (`backend/.env`):
+
+| Variable | Purpose |
+|----------|---------|
+| `MONGODB_URI` | MongoDB Atlas connection string |
+| `MONGODB_DB_NAME` | Database name (default `ar_memory_companion`) |
+| `GROQ_API_KEY` | Groq Whisper (when implementing `transcribe.py`) |
+| `GEMINI_API_KEY` | Gemini (when implementing `extract_topics.py`) |
+
+**Frontend** (`frontend/.env.local`):
+
+| Variable | Purpose |
+|----------|---------|
+| `NEXT_PUBLIC_API_BASE_URL` | Backend origin (default `http://localhost:8000`) |

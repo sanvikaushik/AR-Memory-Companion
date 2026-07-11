@@ -1,0 +1,41 @@
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.db.mongo import close_client
+from app.routes import extract_topics, people, transcribe
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    yield
+    await close_client()
+
+
+app = FastAPI(
+    title="AR Memory Companion API",
+    description="Backend for face-aware memory companion (hackathon MVP)",
+    version="0.1.0",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(people.router, prefix="/api")
+app.include_router(transcribe.router, prefix="/api")
+app.include_router(extract_topics.router, prefix="/api")
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
