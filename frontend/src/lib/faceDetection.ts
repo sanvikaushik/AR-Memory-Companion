@@ -24,7 +24,7 @@ const MODEL_URL =
   "https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights";
 
 /** How often to run recognition (descriptor matching) per frame batch (ms). */
-const RECOGNIZE_EVERY_MS = 500;
+const RECOGNIZE_EVERY_MS = 350;
 
 /** Drop a track if we have not matched a detection to it for this long (ms). */
 const TRACK_STALE_MS = 700;
@@ -34,10 +34,10 @@ const TRACK_STALE_MS = 700;
  * recognition misses before flipping to "unknown". Prevents a known face from
  * briefly turning "unknown" (and re-prompting enrollment) at an odd angle.
  */
-const KNOWN_HYSTERESIS_MISSES = 4;
+const KNOWN_HYSTERESIS_MISSES = 6;
 
 /** Min gap between persisting learned descriptors for one person (ms). */
-const LEARN_PERSIST_MS = 4000;
+const LEARN_PERSIST_MS = 900;
 
 /**
  * Keep drawing a track for this long after its last detection, even on frames
@@ -82,9 +82,16 @@ const MATCH_DISTANCE = 0.6;
  * MATCH_DISTANCE), it's likely a new head angle — learn it so future frames at
  * that angle match cleanly.
  */
-const AUGMENT_MIN_DISTANCE = 0.38;
+const AUGMENT_MIN_DISTANCE = 0.36;
+/**
+ * When a track has already been confidently identified, IoU continuity proves
+ * it is still the same physical face. So even if a frame falls outside
+ * MATCH_DISTANCE (a new/extreme angle), we still learn it — up to this sanity
+ * cap — so that angle matches cleanly next time instead of reading "unknown".
+ */
+const RELEARN_MAX_DISTANCE = 0.85;
 /** Cap reference descriptors per person to bound matching cost. */
-const MAX_DESCRIPTORS_PER_PERSON = 24;
+const MAX_DESCRIPTORS_PER_PERSON = 48;
 
 let faceapi: FaceApi | null = null;
 let modelsLoaded = false;
@@ -150,7 +157,9 @@ export async function loadFaceModels(): Promise<void> {
   await ensureBackend(api);
   await Promise.all([
     api.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-    api.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL),
+    // Full (non-tiny) landmark model: more accurate alignment than the tiny
+    // net, which keeps recognition descriptors stable as the head turns.
+    api.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
     api.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
   ]);
   modelsLoaded = true;
@@ -216,7 +225,7 @@ export async function enrollPeople(people: Person[]): Promise<void> {
       const img = await api.fetchImage(person.photo);
       const detection = await api
         .detectSingleFace(img, options)
-        .withFaceLandmarks(true)
+        .withFaceLandmarks()
         .withFaceDescriptor();
       if (!detection) continue;
       addDescriptorsToStore(person.personId, [Array.from(detection.descriptor)]);
@@ -253,6 +262,30 @@ export function learnDescriptor(personId: string, descriptor: number[]): boolean
   existing.push(Float32Array.from(descriptor));
   rebuildMatcher(faceapi);
   return true;
+}
+
+function euclidean(a: ArrayLike<number>, b: ArrayLike<number>): number {
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) {
+    const diff = a[i] - b[i];
+    sum += diff * diff;
+  }
+  return Math.sqrt(sum);
+}
+
+/**
+ * Nearest distance from `descriptor` to any of a person's reference
+ * descriptors (Infinity if the person is unknown to the matcher).
+ */
+function distanceToPerson(personId: string, descriptor: number[]): number {
+  const refs = descriptorsByPerson.get(personId);
+  if (!refs || refs.length === 0) return Infinity;
+  let min = Infinity;
+  for (const ref of refs) {
+    const d = euclidean(ref, descriptor);
+    if (d < min) min = d;
+  }
+  return min;
 }
 
 /**
@@ -588,51 +621,69 @@ export function startDetectionLoop(
         lastRecognizeAt = now;
         const results = await api
           .detectAllFaces(video, options)
-          .withFaceLandmarks(true)
+          .withFaceLandmarks()
           .withFaceDescriptors();
         if (cancelled) return;
 
         const rawBoxes = results.map((r) => r.detection.box as PixelBox);
         const pairs = tracker.associate(rawBoxes, now, video);
 
+        // Teach a person a new reference descriptor (throttled + persisted).
+        // Called both on loose confident matches and while holding identity
+        // through an off-angle stretch, so the full range of angles is learned.
+        const maybeLearn = (
+          track: Track,
+          personId: string,
+          descriptor: number[],
+          distance: number,
+        ) => {
+          if (
+            distance >= AUGMENT_MIN_DISTANCE &&
+            now - track.lastLearnedAt >= LEARN_PERSIST_MS &&
+            learnDescriptor(personId, descriptor)
+          ) {
+            track.lastLearnedAt = now;
+            void appendDescriptor(personId, descriptor).catch(() => {
+              /* best-effort persistence; ignore transient API errors */
+            });
+          }
+        };
+
         for (const { track, index } of pairs) {
           const frameDescriptor = Array.from(results[index].descriptor);
           addDescriptorSample(track.id, frameDescriptor);
-          // Match against the averaged descriptor for a steadier decision.
-          const averaged = Float32Array.from(
-            meanDescriptor(trackDescriptorSamples.get(track.id) ?? []),
-          );
+          // Match on the CURRENT frame (the current pose), not an average of
+          // recent frames — averaging blurs together different angles when the
+          // head is moving and pushes the distance past the threshold.
           const best = faceMatcher
-            ? faceMatcher.findBestMatch(averaged)
+            ? faceMatcher.findBestMatch(Float32Array.from(frameDescriptor))
             : null;
           track.lastRecognizedAt = now;
 
           if (best && best.label !== "unknown") {
+            // Confident match on this pose.
             track.status = "known";
             track.personId = best.label;
             track.distance = best.distance;
             track.snapshot = null;
             track.missCount = 0;
-
-            // Online learning: a looser (but confident) match usually means a
-            // new head angle. Teach it so this angle matches cleanly next time.
-            if (
-              best.distance >= AUGMENT_MIN_DISTANCE &&
-              now - track.lastLearnedAt >= LEARN_PERSIST_MS &&
-              learnDescriptor(best.label, frameDescriptor)
-            ) {
-              track.lastLearnedAt = now;
-              void appendDescriptor(best.label, frameDescriptor).catch(() => {
-                /* best-effort persistence; ignore transient API errors */
-              });
-            }
+            maybeLearn(track, best.label, frameDescriptor, best.distance);
           } else if (
             track.personId &&
-            track.missCount < KNOWN_HYSTERESIS_MISSES
+            track.missCount < KNOWN_HYSTERESIS_MISSES &&
+            distanceToPerson(track.personId, frameDescriptor) <=
+              RELEARN_MAX_DISTANCE
           ) {
-            // Hold the last identity through brief off-angle misses.
+            // No confident match, but this is the SAME continuously-tracked
+            // face we already identified (IoU continuity) and it's still a
+            // plausible distance away — it's just at a new angle. Hold the
+            // identity AND learn this angle so it matches directly next time.
+            const held = track.personId;
+            const dist = distanceToPerson(held, frameDescriptor);
             track.status = "known";
+            track.distance = dist;
             track.missCount += 1;
+            maybeLearn(track, held, frameDescriptor, dist);
           } else {
             track.status = "unknown";
             track.personId = null;
