@@ -11,7 +11,7 @@ export type SeedPhotoHit = {
   distance: number;
 };
 
-type IndexedSeedPhoto = SeedPhotoMeta & {
+export type IndexedSeedPhoto = SeedPhotoMeta & {
   descriptors: number[][];
 };
 
@@ -118,4 +118,8 @@ export function findSeedPhotosForFace(
 
 export function seedIndexSize(): number {
   return indexed.length;
+}
+
+export function getIndexedSeedPhotos(): IndexedSeedPhoto[] {
+  return indexed;
 }

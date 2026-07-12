@@ -62,7 +62,7 @@ type PixelBox = { x: number; y: number; width: number; height: number };
 export type EstimatedGender = "male" | "female";
 
 /** Min ageGenderNet confidence before we trust boy/girl assignment. */
-const GENDER_CONFIDENCE = 0.65;
+const GENDER_CONFIDENCE = 0.88;
 
 type Track = {
   id: number;
@@ -749,8 +749,17 @@ export function startDetectionLoop(
             result.genderProbability,
           );
           if (genderHit) {
-            track.gender = genderHit.gender;
-            track.genderProbability = genderHit.probability;
+            const prevP = track.genderProbability ?? 0;
+            // Stick to first gender; only flip if the new read is much more sure.
+            if (
+              !track.gender ||
+              (genderHit.gender === track.gender &&
+                genderHit.probability >= prevP) ||
+              genderHit.probability >= Math.max(0.92, prevP + 0.2)
+            ) {
+              track.gender = genderHit.gender;
+              track.genderProbability = genderHit.probability;
+            }
           }
 
           // Match on the CURRENT frame (the current pose), not an average of

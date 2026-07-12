@@ -1,0 +1,33 @@
+{
+  "personId": "ishaan-chandra",
+  "name": "Ishaan",
+  "fullName": "Ishaan Chandra",
+  "image": "IMG_7655.jpeg",
+  "gender": "male",
+  "relationship": "friend",
+  "headline": "SWE Intern @ Ericsson | CS, ML & AI @ Carleton",
+  "appearance": {
+    "summary": "Young man with short dark hair, thin metal-frame glasses, warm smile",
+    "hair": "Short, dark, neatly styled",
+    "eyes": "Dark brown; wears thin metallic glasses",
+    "glasses": true,
+    "skinTone": "Medium brown",
+    "facialHair": "None / clean-shaven",
+    "expression": "Friendly smile showing teeth",
+    "clothing": "Light beige or off-white textured button-down shirt",
+    "accessories": ["Thin silver chain necklace", "Thin metal-frame glasses"],
+    "build": "Average, chest-up portrait"
+  },
+  "facts": [
+    "Your friend Ishaan Chandra",
+    "Software Engineer Intern at Ericsson in Ottawa",
+    "Studies Computer Science, Machine Learning and AI at Carleton University",
+    "Previously Software Developer at Transport Canada"
+  ],
+  "cues": [
+    "Say his name: Ishaan",
+    "Ishaan wears glasses",
+    "Ishaan works at Ericsson in Ottawa",
+    "Ishaan studies computer science at Carleton"
+  ]
+}

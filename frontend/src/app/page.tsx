@@ -1,50 +1,58 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import CameraFeed from "@/components/CameraFeed";
+import Flashcards from "@/components/Flashcards";
 import HudCard from "@/components/HudCard";
+import ModeNav, { type AppMode } from "@/components/ModeNav";
+import PhotoAlbum from "@/components/PhotoAlbum";
 import QuizScreen from "@/components/QuizScreen";
 import SessionControls from "@/components/SessionControls";
-import {
-  HARDCODED_BY_GENDER,
-  enrollPeople,
-  type EstimatedGender,
-} from "@/lib/faceDetection";
-import { listPeople } from "@/lib/api";
+import { listCacheWho } from "@/lib/api";
+import { enrollPeople } from "@/lib/faceDetection";
+import { loadCacheWhoIndex } from "@/lib/cacheWho";
 import type { Person, TrackedFace } from "@/lib/types";
 
-type View = "live" | "quiz";
-
-/**
- * Live companion UX:
- * camera → boy/girl → show Ishaan / Sanvi HUD (LinkedIn info from DB).
- * Does NOT capture live photos — add profile + camera-roll photos on the HUD.
- */
+/** Wearable dementia companion: live AR + Cache_who identity + cards/photos/quiz. */
 export default function HomePage() {
   const [people, setPeople] = useState<Person[]>([]);
   const [recognizedPeople, setRecognizedPeople] = useState<Person[]>([]);
   const [recognitionHint, setRecognitionHint] = useState(
-    "Looking for a face…",
+    "Looking for friends…",
   );
-  const [view, setView] = useState<View>("live");
+  const [mode, setMode] = useState<AppMode>("live");
   const [apiStatus, setApiStatus] = useState("Connecting…");
-
-  const peopleRef = useRef<Person[]>([]);
-  const genderByTrackRef = useRef<Map<number, EstimatedGender>>(new Map());
-  peopleRef.current = people;
+  const [calm, setCalm] = useState(false);
+  const [sessionOpen, setSessionOpen] = useState(false);
 
   const activePerson = recognizedPeople[0] ?? null;
 
-  const refreshPeople = useCallback(async () => {
+  const refreshCacheWho = useCallback(async () => {
     try {
-      const list = await listPeople();
+      const profiles = await listCacheWho();
+      const indexed = await loadCacheWhoIndex();
+      const list: Person[] = indexed.map((p) => ({
+        personId: p.personId,
+        name: p.fullName || p.name,
+        relationship: p.relationship || "friend",
+        headline: p.headline,
+        linkedinUrl: "",
+        photo: p.imageUrl,
+        photos: [p.imageUrl],
+        facts: p.facts,
+        cues: p.cues,
+        comfortTips: [],
+        conversationHistory: [],
+        spacedRetrievalState: {},
+        descriptors: p.descriptors,
+        descriptor: p.descriptors[0] ?? [],
+      }));
       setPeople(list);
-      peopleRef.current = list;
       await enrollPeople(list);
       setApiStatus(
-        list.length === 0
-          ? "No people in DB yet"
-          : `${list.length} profile(s) loaded`,
+        profiles.length === 0
+          ? "Add JSON + photos in backend/seed/Cache_who"
+          : `${profiles.length} Cache_who profile(s) ready`,
       );
     } catch (err) {
       setApiStatus(
@@ -56,144 +64,154 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    void refreshPeople();
-  }, [refreshPeople]);
+    void refreshCacheWho();
+  }, [refreshCacheWho]);
 
-  const personForGender = useCallback(
-    (gender: EstimatedGender, list: Person[]): Person | null => {
-      const assumed = HARDCODED_BY_GENDER[gender];
-      return (
-        list.find((p) => p.personId === assumed.personId) ??
-        list.find((p) => p.name === assumed.name) ??
-        null
+  const onFaces = useCallback((faces: TrackedFace[]) => {
+    if (faces.length === 0) {
+      setRecognitionHint("Looking for friends…");
+      return;
+    }
+    const known = faces.filter((f) => f.status === "known" && f.personId);
+    if (known.length === 0) {
+      setRecognitionHint(
+        faces.length === 1
+          ? "Unknown person"
+          : `${faces.length} unknown people`,
       );
-    },
-    [],
-  );
-
-  const onFaces = useCallback(
-    (faces: TrackedFace[]) => {
-      if (faces.length === 0) {
-        setRecognizedPeople([]);
-        setRecognitionHint("Looking for a face…");
-        return;
-      }
-
-      const list = peopleRef.current;
-      const matchedById = new Map<string, Person>();
-
-      // Face-matcher hits (from manually enrolled photos).
-      for (const face of faces) {
-        if (face.status === "known" && face.personId) {
-          const person = list.find((p) => p.personId === face.personId);
-          if (person) matchedById.set(person.personId, person);
-        }
-      }
-
-      // Boy/girl → Ishaan / Sanvi (no live photo capture).
-      for (const face of faces) {
-        const gender: EstimatedGender | null =
-          face.gender ?? genderByTrackRef.current.get(face.trackId) ?? null;
-        if (face.gender) {
-          genderByTrackRef.current.set(face.trackId, face.gender);
-        }
-        if (!gender) continue;
-
-        const person = personForGender(gender, list);
-        if (person) {
-          matchedById.set(person.personId, person);
-        } else {
-          const assumed = HARDCODED_BY_GENDER[gender];
-          matchedById.set(assumed.personId, {
-            personId: assumed.personId,
-            name: assumed.name,
-            relationship: assumed.relationship,
-            headline: "",
-            linkedinUrl: "",
-            photo: "",
-            photos: [],
-            facts: [],
-            conversationHistory: [],
-            spacedRetrievalState: {},
-          });
-        }
-      }
-
-      const matched = Array.from(matchedById.values());
-      if (matched.length > 0) {
-        setRecognizedPeople(matched);
-        setRecognitionHint(
-          `Recognized ${matched.map((p) => p.name).join(", ")}`,
-        );
-      } else if (faces.some((f) => f.gender == null && f.status !== "known")) {
-        setRecognitionHint("Detecting boy / girl…");
-      } else {
-        setRecognitionHint(`Tracking ${faces.length} face(s)…`);
-      }
-    },
-    [personForGender],
-  );
-
-  if (view === "quiz" && activePerson) {
-    return (
-      <main className="app">
-        <header className="app-header">
-          <h1>AR Memory Companion</h1>
-          <div className="toolbar">
-            <button type="button" onClick={() => setView("live")}>
-              Back to live
-            </button>
-          </div>
-        </header>
-        <QuizScreen person={activePerson} onDone={() => setView("live")} />
-      </main>
+      return;
+    }
+    setRecognitionHint(
+      known.length === 1
+        ? "Friend recognized"
+        : `${known.length} friends recognized`,
     );
-  }
+  }, []);
+
+  const onMatchedPeople = useCallback((matched: Person[]) => {
+    setRecognizedPeople(matched);
+    if (matched.length === 1) {
+      setRecognitionHint(`${matched[0].name} is with you`);
+    } else if (matched.length > 1) {
+      setRecognitionHint(
+        `${matched.map((p) => p.name.split(" ")[0]).join(" & ")} are with you`,
+      );
+    }
+  }, []);
 
   return (
-    <div className="stage">
-      <CameraFeed onFaces={onFaces} people={people} />
-
-      <div className="top-bar">
-        <div className="top-bar__info">
-          <h1>AR Memory Companion</h1>
-          <p className="top-bar__hint">{recognitionHint}</p>
-          <p className="top-bar__status">{apiStatus}</p>
+    <div className={`stage ${calm ? "stage--calm" : ""}`}>
+      {mode === "live" && (
+        <div className="stage__camera">
+          <CameraFeed onFaces={onFaces} onMatchedPeople={onMatchedPeople} />
         </div>
-        <button
-          type="button"
-          className="ghost-btn"
-          onClick={() => setView("quiz")}
-          disabled={!activePerson}
-        >
-          Open quiz
-        </button>
-      </div>
+      )}
 
-      <div className="hud-stack">
-        {recognizedPeople.length > 0 ? (
-          recognizedPeople.map((person) => (
-            <HudCard
-              key={person.personId}
-              person={person}
+      {mode === "live" && (
+        <>
+          <div className="top-bar">
+            <div className="top-bar__info">
+              <h1>Memory Companion</h1>
+              <p className="top-bar__hint">{recognitionHint}</p>
+              {!calm && <p className="top-bar__status">{apiStatus}</p>}
+            </div>
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={() => setCalm((c) => !c)}
+            >
+              {calm ? "More detail" : "Calm view"}
+            </button>
+          </div>
+
+          <div className="hud-stack">
+            {recognizedPeople.length > 0 ? (
+              recognizedPeople.map((person) => (
+                <HudCard
+                  key={person.personId}
+                  person={person}
+                  present={recognizedPeople}
+                  calm={calm}
+                />
+              ))
+            ) : (
+              <HudCard person={null} calm={calm} />
+            )}
+          </div>
+
+          <div className={`dock ${calm && !sessionOpen ? "dock--collapsed" : ""}`}>
+            {calm && !sessionOpen ? (
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={() => setSessionOpen(true)}
+              >
+                Conversation
+              </button>
+            ) : (
+              <>
+                {calm && (
+                  <button
+                    type="button"
+                    className="ghost-btn dock__hide"
+                    onClick={() => setSessionOpen(false)}
+                  >
+                    Hide
+                  </button>
+                )}
+                <SessionControls
+                  personId={activePerson?.personId}
+                  personName={activePerson?.name}
+                  speakerNames={
+                    people.length > 0
+                      ? people.map((p) => p.name)
+                      : ["Ishaan Chandra", "Sanvi Kaushik"]
+                  }
+                />
+              </>
+            )}
+          </div>
+        </>
+      )}
+
+      {mode === "cards" && (
+        <div className="mode-overlay">
+          <Flashcards
+            people={people}
+            activePerson={activePerson ?? people[0] ?? null}
+          />
+        </div>
+      )}
+
+      {mode === "album" && (
+        <div className="mode-overlay">
+          <PhotoAlbum people={people} />
+        </div>
+      )}
+
+      {mode === "quiz" && (
+        <div className="mode-overlay">
+          {activePerson || people[0] ? (
+            <QuizScreen
+              person={activePerson ?? people[0]}
+              onDone={() => setMode("live")}
             />
-          ))
-        ) : (
-          <HudCard person={null} />
-        )}
-      </div>
+          ) : (
+            <section className="mode-panel">
+              <h2>Quiz</h2>
+              <p className="mode-panel__lead">
+                Cache_who profiles will appear when the backend is ready.
+              </p>
+            </section>
+          )}
+        </div>
+      )}
 
-      <div className="dock">
-        <SessionControls
-          personId={activePerson?.personId}
-          personName={activePerson?.name}
-          speakerNames={
-            people.length > 0
-              ? people.map((p) => p.name)
-              : ["Ishaan Chandra", "Sanvi Kaushik"]
-          }
-        />
-      </div>
+      <ModeNav
+        mode={mode}
+        onChange={setMode}
+        quizDisabled={!(activePerson || people[0])}
+      />
     </div>
   );
 }

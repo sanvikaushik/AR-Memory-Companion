@@ -5,6 +5,7 @@ import type {
   Person,
   PersonCreate,
   PersonUpdate,
+  PrepBriefing,
   TranscribeResponse,
 } from "./types";
 
@@ -101,6 +102,29 @@ export async function listSeedPhotos(): Promise<SeedPhotoMeta[]> {
   }));
 }
 
+export type CacheWhoProfile = {
+  personId: string;
+  name: string;
+  fullName: string;
+  image: string;
+  imageUrl: string;
+  gender: string;
+  relationship: string;
+  headline: string;
+  appearance: Record<string, unknown>;
+  facts: string[];
+  cues: string[];
+};
+
+/** Identity cache from backend/seed/Cache_who (JSON + photo). */
+export async function listCacheWho(): Promise<CacheWhoProfile[]> {
+  const profiles = await request<CacheWhoProfile[]>("/api/seed/cache-who");
+  return profiles.map((p) => ({
+    ...p,
+    imageUrl: `${API_BASE}${p.imageUrl}`,
+  }));
+}
+
 /** Boy → Ishaan Chandra, girl → Sanvi Kaushik (fixed DB records). */
 export async function assignHardcodedFace(
   gender: "male" | "female",
@@ -151,6 +175,15 @@ export async function listConversations(
 ): Promise<ConversationMemory[]> {
   const qs = personId ? `?personId=${encodeURIComponent(personId)}` : "";
   return request<ConversationMemory[]>(`/api/conversations${qs}`);
+}
+
+/** Prep briefing from past transcripts for a person. */
+export async function fetchPrepBriefing(
+  personId: string,
+): Promise<PrepBriefing> {
+  return request<PrepBriefing>(
+    `/api/conversations/prep/${encodeURIComponent(personId)}`,
+  );
 }
 
 export async function extractTopics(

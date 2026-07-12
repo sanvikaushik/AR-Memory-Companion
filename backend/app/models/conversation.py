@@ -31,6 +31,7 @@ class ConversationMemory(BaseModel):
     speakerTakeaways: list[SpeakerTakeaway] = Field(default_factory=list)
     cues: list[str] = Field(default_factory=list)
     emotionalTone: str | None = None
+    openLoops: list[str] = Field(default_factory=list)
 
 
 class ConversationMemoryCreate(BaseModel):
@@ -45,3 +46,4 @@ class ConversationMemoryCreate(BaseModel):
     speakerTakeaways: list[SpeakerTakeaway] = Field(default_factory=list)
     cues: list[str] = Field(default_factory=list)
     emotionalTone: str | None = None
+    openLoops: list[str] = Field(default_factory=list)

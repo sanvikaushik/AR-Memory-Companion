@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/seed", tags=["seed"])
 
 SEED_DIR = Path(__file__).resolve().parents[2] / "seed"
 CACHE_DIR = SEED_DIR / ".web_cache"
+CACHE_WHO_DIR = SEED_DIR / "Cache_who"
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
 WEB_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -22,6 +25,20 @@ class SeedPhoto(BaseModel):
     id: str
     filename: str
     url: str
+
+
+class CacheWhoProfile(BaseModel):
+    personId: str
+    name: str
+    fullName: str = ""
+    image: str
+    imageUrl: str
+    gender: str = ""
+    relationship: str = ""
+    headline: str = ""
+    appearance: dict[str, Any] = Field(default_factory=dict)
+    facts: list[str] = Field(default_factory=list)
+    cues: list[str] = Field(default_factory=list)
 
 
 def _ensure_cache() -> None:
@@ -70,7 +87,6 @@ async def list_seed_photos() -> list[SeedPhoto]:
             continue
         if path.suffix.lower() not in IMAGE_EXTS:
             continue
-        # Skip cache folder files if any leaked to root.
         if path.name.startswith("."):
             continue
         photos.append(
@@ -85,11 +101,57 @@ async def list_seed_photos() -> list[SeedPhoto]:
 
 @router.get("/file/{filename}")
 async def get_seed_file(filename: str):
-    # Prevent path traversal.
     safe = Path(filename).name
     src = SEED_DIR / safe
     if not src.is_file() or src.suffix.lower() not in IMAGE_EXTS:
         raise HTTPException(status_code=404, detail="Seed photo not found")
+    web = _web_path_for(src)
+    media = "image/jpeg" if web.suffix.lower() in {".jpg", ".jpeg"} else None
+    return FileResponse(web, media_type=media)
+
+
+@router.get("/cache-who", response_model=list[CacheWhoProfile])
+async def list_cache_who() -> list[CacheWhoProfile]:
+    """Identity cache: JSON profiles + linked photos under seed/Cache_who."""
+    if not CACHE_WHO_DIR.is_dir():
+        return []
+
+    profiles: list[CacheWhoProfile] = []
+    for path in sorted(CACHE_WHO_DIR.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        image = str(data.get("image") or "")
+        if not image:
+            continue
+        image_path = CACHE_WHO_DIR / Path(image).name
+        if not image_path.is_file():
+            continue
+        profiles.append(
+            CacheWhoProfile(
+                personId=str(data.get("personId") or path.stem),
+                name=str(data.get("name") or path.stem),
+                fullName=str(data.get("fullName") or data.get("name") or path.stem),
+                image=image_path.name,
+                imageUrl=f"/api/seed/cache-who/file/{image_path.name}",
+                gender=str(data.get("gender") or ""),
+                relationship=str(data.get("relationship") or ""),
+                headline=str(data.get("headline") or ""),
+                appearance=data.get("appearance") or {},
+                facts=list(data.get("facts") or []),
+                cues=list(data.get("cues") or []),
+            )
+        )
+    return profiles
+
+
+@router.get("/cache-who/file/{filename}")
+async def get_cache_who_file(filename: str):
+    safe = Path(filename).name
+    src = CACHE_WHO_DIR / safe
+    if not src.is_file() or src.suffix.lower() not in IMAGE_EXTS:
+        raise HTTPException(status_code=404, detail="Cache_who photo not found")
     web = _web_path_for(src)
     media = "image/jpeg" if web.suffix.lower() in {".jpg", ".jpeg"} else None
     return FileResponse(web, media_type=media)

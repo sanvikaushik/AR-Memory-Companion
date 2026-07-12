@@ -11,6 +11,7 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=True)
 from app.db.mongo import close_client
 from app.routes import conversations, extract_topics, people, seed, transcribe
 from app.services.hardcoded_people import ensure_hardcoded_people
+from app.services.seed_conversations import ensure_seed_conversations
 from app.services.transcribe import _groq_api_key
 
 
@@ -24,6 +25,10 @@ async def lifespan(_app: FastAPI):
     # Always keep Ishaan + Sanvi in the people collection.
     try:
         await ensure_hardcoded_people()
+    except Exception:
+        pass
+    try:
+        await ensure_seed_conversations()
     except Exception:
         pass
     yield

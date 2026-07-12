@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import SeedPhotoSlideshow from "@/components/SeedPhotoSlideshow";
+import { useEffect, useRef, useState } from "react";
 import {
   getTrackDescriptor,
   loadFaceModels,
@@ -9,93 +8,85 @@ import {
   startDetectionLoop,
 } from "@/lib/faceDetection";
 import {
-  findSeedPhotosForFace,
-  loadSeedPhotoIndex,
-  type SeedPhotoHit,
-} from "@/lib/seedPhotos";
+  getCacheWhoIndex,
+  loadCacheWhoIndex,
+  matchCacheWho,
+  type IndexedCacheWho,
+} from "@/lib/cacheWho";
 import type { Person, TrackedFace } from "@/lib/types";
 
 type CameraFeedProps = {
   onFaces: (faces: TrackedFace[]) => void;
-  /** Used to label recognized ovals with a person's name. */
-  people?: Person[];
+  /** Called with Cache_who people currently matched in frame. */
+  onMatchedPeople?: (people: Person[]) => void;
 };
 
 type OverlayFace = {
   trackId: number;
-  status: TrackedFace["status"];
-  label: string;
+  known: boolean;
+  name: string;
+  relationship: string;
+  headline: string;
+  fact: string;
   left: number;
   top: number;
-  width: number;
-  height: number;
+  size: number;
 };
 
-type LockedAlbum = {
-  trackId: number;
-  personName: string;
-  hits: SeedPhotoHit[];
-  faceLeft: number;
-  faceTop: number;
-  faceHeight: number;
-};
+function profileToPerson(profile: IndexedCacheWho): Person {
+  const appearanceSummary =
+    typeof profile.appearance?.summary === "string"
+      ? profile.appearance.summary
+      : "";
+  return {
+    personId: profile.personId,
+    name: profile.fullName || profile.name,
+    relationship: profile.relationship || "friend",
+    headline: profile.headline,
+    linkedinUrl: "",
+    photo: profile.imageUrl,
+    photos: [profile.imageUrl],
+    facts: profile.facts,
+    cues: [
+      ...(appearanceSummary ? [appearanceSummary] : []),
+      ...profile.cues,
+    ],
+    comfortTips: [],
+    conversationHistory: [],
+    spacedRetrievalState: {},
+    descriptors: profile.descriptors,
+    descriptor: profile.descriptors[0] ?? [],
+  };
+}
 
 /**
- * Webcam + live multi-face oval overlays.
- * After a face is identified, matching seed photos play one-at-a-time on the left.
+ * Webcam + face circles.
+ * Matches live faces only against backend/seed/Cache_who.
+ * No match → "Unknown person".
  */
-export default function CameraFeed({ onFaces, people = [] }: CameraFeedProps) {
+export default function CameraFeed({ onFaces, onMatchedPeople }: CameraFeedProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const onFacesRef = useRef(onFaces);
+  const onMatchedRef = useRef(onMatchedPeople);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [loadingModels, setLoadingModels] = useState(true);
-  const [seedStatus, setSeedStatus] = useState("Indexing seed photos…");
+  const [indexStatus, setIndexStatus] = useState("Loading Cache_who…");
   const [overlays, setOverlays] = useState<OverlayFace[]>([]);
-  const [album, setAlbum] = useState<LockedAlbum | null>(null);
-  const lockedHitsRef = useRef<Map<number, SeedPhotoHit[]>>(new Map());
+  const lockedPersonRef = useRef<Map<number, string>>(new Map());
+  const [camRetry, setCamRetry] = useState(0);
 
   onFacesRef.current = onFaces;
-
-  const nameById = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const p of people) map.set(p.personId, p.name);
-    return map;
-  }, [people]);
-  const nameByIdRef = useRef(nameById);
-  nameByIdRef.current = nameById;
+  onMatchedRef.current = onMatchedPeople;
 
   useEffect(() => {
     let stopLoop: (() => void) | undefined;
     let stream: MediaStream | undefined;
     let cancelled = false;
 
-    async function setup() {
+    async function openCamera(): Promise<MediaStream> {
       try {
-        setLoadingModels(true);
-        await loadFaceModels();
-        if (cancelled) return;
-
-        try {
-          await loadSeedPhotoIndex((done, total) => {
-            if (!cancelled) {
-              setSeedStatus(
-                total === 0
-                  ? "No photos in backend/seed"
-                  : `Indexing seed photos ${done}/${total}…`,
-              );
-            }
-          });
-          if (!cancelled) setSeedStatus("");
-        } catch (err) {
-          console.warn("[CameraFeed] seed index failed", err);
-          if (!cancelled) setSeedStatus("Seed photo index unavailable");
-        }
-
-        if (cancelled) return;
-        setLoadingModels(false);
-
-        stream = await navigator.mediaDevices.getUserMedia({
+        return await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: "user",
             width: { ideal: 1280 },
@@ -103,6 +94,59 @@ export default function CameraFeed({ onFaces, people = [] }: CameraFeedProps) {
           },
           audio: false,
         });
+      } catch {
+        return await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false,
+        });
+      }
+    }
+
+    function friendlyCamError(err: unknown): string {
+      const name = err instanceof DOMException ? err.name : "";
+      const msg = err instanceof Error ? err.message : String(err);
+      if (
+        name === "NotReadableError" ||
+        /Could not start video source/i.test(msg)
+      ) {
+        return (
+          "Camera is busy. Close the Cursor browser preview (or any other tab/app using the webcam), then tap Retry."
+        );
+      }
+      if (name === "NotAllowedError" || /Permission/i.test(msg)) {
+        return "Camera permission blocked in Edge. Allow camera for localhost, then tap Retry.";
+      }
+      return msg || "Could not start camera";
+    }
+
+    async function setup() {
+      try {
+        setError(null);
+        setReady(false);
+        setLoadingModels(true);
+        await loadFaceModels();
+        if (cancelled) return;
+
+        try {
+          await loadCacheWhoIndex((done, total) => {
+            if (!cancelled) {
+              setIndexStatus(
+                total === 0
+                  ? "No Cache_who profiles found"
+                  : `Indexing Cache_who ${done}/${total}…`,
+              );
+            }
+          });
+          if (!cancelled) setIndexStatus("");
+        } catch (err) {
+          console.warn("[CameraFeed] Cache_who index failed", err);
+          if (!cancelled) setIndexStatus("Cache_who unavailable");
+        }
+
+        if (cancelled) return;
+        setLoadingModels(false);
+
+        stream = await openCamera();
         const video = videoRef.current;
         if (!video) return;
         video.srcObject = stream;
@@ -110,70 +154,92 @@ export default function CameraFeed({ onFaces, people = [] }: CameraFeedProps) {
         setReady(true);
 
         stopLoop = startDetectionLoop(video, (faces) => {
-          const activeIds = new Set(faces.map((f) => f.trackId));
-          for (const id of [...lockedHitsRef.current.keys()]) {
-            if (!activeIds.has(id)) lockedHitsRef.current.delete(id);
-          }
+          const matchedPeople = new Map<string, Person>();
 
           const mapped: OverlayFace[] = faces.map((face) => {
-            const box = mapBoxToElementPercent(face.box, video);
-            const name = face.personId
-              ? nameByIdRef.current.get(face.personId)
-              : undefined;
-            const label =
-              name ??
-              (face.gender === "female"
-                ? "Sanvi Kaushik"
-                : face.gender === "male"
-                  ? "Ishaan Chandra"
-                  : face.status);
+            const mappedBox = mapBoxToElementPercent(face.box, video);
+            const size = Math.max(mappedBox.width, mappedBox.height) * 0.38;
+            const cx = mappedBox.left + mappedBox.width / 2;
+            const cy = mappedBox.top + mappedBox.height / 2;
+            const left = cx - size / 2;
+            const top = cy - size / 2;
 
-            // Lock seed matches once we have a solid live descriptor.
             const descriptor = getTrackDescriptor(face.trackId);
-            if (descriptor && !lockedHitsRef.current.has(face.trackId)) {
-              const hits = findSeedPhotosForFace(descriptor);
-              if (hits.length > 0) {
-                lockedHitsRef.current.set(face.trackId, hits);
+            const hit = matchCacheWho(descriptor);
+
+            if (hit) {
+              lockedPersonRef.current.set(face.trackId, hit.profile.personId);
+            }
+
+            let profile: IndexedCacheWho | null = hit?.profile ?? null;
+            if (!profile) {
+              const lockedId = lockedPersonRef.current.get(face.trackId);
+              if (lockedId) {
+                profile =
+                  getCacheWhoIndex().find((p) => p.personId === lockedId) ??
+                  null;
               }
             }
 
+            if (profile) {
+              matchedPeople.set(profile.personId, profileToPerson(profile));
+              lockedPersonRef.current.set(face.trackId, profile.personId);
+            }
+
+            if (!profile) {
+              return {
+                trackId: face.trackId,
+                known: false,
+                name: "Unknown person",
+                relationship: "",
+                headline: "",
+                fact: "",
+                left,
+                top,
+                size,
+              };
+            }
+
+            const appearance =
+              typeof profile.appearance?.summary === "string"
+                ? profile.appearance.summary
+                : "";
+
             return {
               trackId: face.trackId,
-              status: face.status,
-              label,
-              left: box.x * 100,
-              top: box.y * 100,
-              width: box.width * 100,
-              height: box.height * 100,
+              known: true,
+              name: profile.fullName || profile.name,
+              relationship: profile.relationship,
+              headline: profile.headline,
+              fact: appearance || profile.facts[0] || profile.cues[0] || "",
+              left,
+              top,
+              size,
             };
           });
-          setOverlays(mapped);
 
-          // Prefer the first face that has locked seed hits (usually Ishaan/Sanvi).
-          const primary =
-            mapped.find((f) => lockedHitsRef.current.has(f.trackId)) ??
-            mapped[0] ??
-            null;
-          if (primary && lockedHitsRef.current.has(primary.trackId)) {
-            setAlbum({
-              trackId: primary.trackId,
-              personName: primary.label,
-              hits: lockedHitsRef.current.get(primary.trackId) ?? [],
-              faceLeft: primary.left,
-              faceTop: primary.top,
-              faceHeight: primary.height,
-            });
-          } else {
-            setAlbum(null);
+          const activeIds = new Set(faces.map((f) => f.trackId));
+          for (const id of [...lockedPersonRef.current.keys()]) {
+            if (!activeIds.has(id)) lockedPersonRef.current.delete(id);
           }
 
-          onFacesRef.current(faces);
+          setOverlays(mapped);
+          onMatchedRef.current?.(Array.from(matchedPeople.values()));
+
+          const enriched: TrackedFace[] = faces.map((face) => {
+            const overlay = mapped.find((o) => o.trackId === face.trackId);
+            const personId = lockedPersonRef.current.get(face.trackId) ?? null;
+            return {
+              ...face,
+              status: overlay?.known ? "known" : "unknown",
+              personId: overlay?.known ? personId : null,
+            };
+          });
+          onFacesRef.current(enriched);
         });
       } catch (err) {
         if (!cancelled) {
-          setError(
-            err instanceof Error ? err.message : "Could not start camera",
-          );
+          setError(friendlyCamError(err));
           setLoadingModels(false);
         }
       }
@@ -185,8 +251,10 @@ export default function CameraFeed({ onFaces, people = [] }: CameraFeedProps) {
       cancelled = true;
       stopLoop?.();
       stream?.getTracks().forEach((t) => t.stop());
+      const video = videoRef.current;
+      if (video) video.srcObject = null;
     };
-  }, []);
+  }, [camRetry]);
 
   return (
     <div className="camera-feed">
@@ -194,39 +262,52 @@ export default function CameraFeed({ onFaces, people = [] }: CameraFeedProps) {
       {overlays.map((face) => (
         <div
           key={face.trackId}
-          className={`face-oval face-oval--${face.status}`}
+          className={`face-circle ${face.known ? "face-circle--known" : "face-circle--unknown"}`}
           style={{
             left: `${face.left}%`,
             top: `${face.top}%`,
-            width: `${face.width}%`,
-            height: `${face.height}%`,
+            width: `${face.size}%`,
+            height: `${face.size}%`,
           }}
           aria-hidden
         >
-          <span className="face-label">{face.label}</span>
+          <div className="face-forehead">
+            <p className="face-forehead__name">{face.name}</p>
+            {face.relationship ? (
+              <p className="face-forehead__meta">Your {face.relationship}</p>
+            ) : null}
+            {face.headline ? (
+              <p className="face-forehead__meta">{face.headline}</p>
+            ) : null}
+            {face.fact ? (
+              <p className="face-forehead__fact">{face.fact}</p>
+            ) : null}
+          </div>
         </div>
       ))}
-      {album && album.hits.length > 0 && (
-        <SeedPhotoSlideshow
-          hits={album.hits}
-          faceLeft={album.faceLeft}
-          faceTop={album.faceTop}
-          faceHeight={album.faceHeight}
-          personName={album.personName}
-        />
-      )}
       {overlays.length > 0 && (
         <span className="face-count">{overlays.length} face(s)</span>
       )}
       {loadingModels && (
         <p className="camera-status">
-          {seedStatus || "Loading face models…"}
+          {indexStatus || "Loading face models…"}
         </p>
       )}
       {!ready && !error && !loadingModels && (
         <p className="camera-status">Starting camera…</p>
       )}
-      {error && <p className="camera-error">{error}</p>}
+      {error && (
+        <div className="camera-error-box">
+          <p className="camera-error">{error}</p>
+          <button
+            type="button"
+            className="ghost-btn"
+            onClick={() => setCamRetry((n) => n + 1)}
+          >
+            Retry camera
+          </button>
+        </div>
+      )}
     </div>
   );
 }

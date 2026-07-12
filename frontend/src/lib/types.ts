@@ -29,6 +29,23 @@ export type ConversationMemory = {
   speakerTakeaways: SpeakerTakeaway[];
   cues: string[];
   emotionalTone?: string | null;
+  openLoops?: string[];
+};
+
+/** Pre-conversation briefing aggregated from past transcripts. */
+export type PrepBriefing = {
+  personId: string;
+  talkCount: number;
+  lastSummary: string;
+  lastPlace: string;
+  lastTone: string;
+  topics: string[];
+  facts: string[];
+  openLoops: string[];
+  starters: string[];
+  doNotForget: string[];
+  safeTopics: string[];
+  continuityLine: string;
 };
 
 export type Person = {
@@ -43,17 +60,13 @@ export type Person = {
   /** Camera-roll + enrollment crops stored as data URLs. */
   photos?: string[];
   facts: string[];
+  /** Gentle recall prompts for the HUD / games. */
+  cues?: string[];
+  /** Short conversation starters. */
+  comfortTips?: string[];
   conversationHistory: ConversationEntry[];
   spacedRetrievalState: Record<string, unknown>;
-  /**
-   * 128-d face embedding captured at enrollment. Stored so recognition and
-   * duplicate detection don't need to re-run detection on the photo each load.
-   */
   descriptor?: number[];
-  /**
-   * Additional reference embeddings (different angles / lighting), grown via
-   * online learning. Matching uses the nearest of these for angle robustness.
-   */
   descriptors?: number[][];
 };
 

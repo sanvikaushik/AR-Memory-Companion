@@ -23,6 +23,10 @@ class Person(BaseModel):
     # Camera-roll + enrollment crops stored as data URLs.
     photos: list[str] = Field(default_factory=list)
     facts: list[str] = Field(default_factory=list)
+    # Gentle dementia-friendly recall prompts for the HUD / games.
+    cues: list[str] = Field(default_factory=list)
+    # Short conversation starters the wearer can try.
+    comfortTips: list[str] = Field(default_factory=list)
     conversationHistory: list[ConversationEntry] = Field(default_factory=list)
     spacedRetrievalState: dict[str, Any] = Field(default_factory=dict)
     # 128-d face embedding used for recognition + duplicate detection.
@@ -39,6 +43,8 @@ class PersonCreate(BaseModel):
     linkedinUrl: str = ""
     photos: list[str] = Field(default_factory=list)
     facts: list[str] = Field(default_factory=list)
+    cues: list[str] = Field(default_factory=list)
+    comfortTips: list[str] = Field(default_factory=list)
     conversationHistory: list[ConversationEntry] = Field(default_factory=list)
     spacedRetrievalState: dict[str, Any] = Field(default_factory=dict)
     descriptor: list[float] = Field(default_factory=list)
@@ -53,6 +59,8 @@ class PersonUpdate(BaseModel):
     photo: str | None = None
     photos: list[str] | None = None
     facts: list[str] | None = None
+    cues: list[str] | None = None
+    comfortTips: list[str] | None = None
     conversationHistory: list[ConversationEntry] | None = None
     spacedRetrievalState: dict[str, Any] | None = None
     descriptor: list[float] | None = None

@@ -1,23 +1,60 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
+import { useVoiceGreeting } from "@/hooks/useVoiceGreeting";
 import type { Person } from "@/lib/types";
 
 type HudCardProps = {
   person: Person | null;
+  present?: Person[];
+  calm?: boolean;
+  voiceEnabled?: boolean;
 };
 
 const hasPhoto = (photo: string) =>
   !!photo && !photo.startsWith("data:image/svg");
 
-/** Profile overlay shown when a boy/girl face maps to Ishaan / Sanvi. */
-export default function HudCard({ person }: HudCardProps) {
+function firstName(name: string): string {
+  return name.split(" ")[0] || name;
+}
+
+/** Large dementia-friendly profile overlay. */
+export default function HudCard({
+  person,
+  present = [],
+  calm = false,
+  voiceEnabled = true,
+}: HudCardProps) {
+  const [cueIndex, setCueIndex] = useState(0);
+  useVoiceGreeting(person?.name, voiceEnabled && !!person);
+
+  const cues = useMemo(() => {
+    if (!person) return [];
+    const fromCues = person.cues ?? [];
+    const fromFacts = person.facts.filter(
+      (f) => !f.toLowerCase().startsWith("linkedin:"),
+    );
+    const fromChat = person.conversationHistory
+      .slice(-2)
+      .map((c) => c.summary)
+      .filter(Boolean) as string[];
+    return [...fromCues, ...fromFacts, ...fromChat];
+  }, [person]);
+
+  useEffect(() => {
+    setCueIndex(0);
+    if (cues.length <= 1) return;
+    const id = window.setInterval(() => {
+      setCueIndex((i) => (i + 1) % cues.length);
+    }, 4500);
+    return () => window.clearInterval(id);
+  }, [cues]);
+
   if (!person) {
     return (
-      <aside className="hud-card hud-card--empty">
-        <p className="hud-card__hint">No match yet</p>
-        <p className="muted">
-          Point the camera at a face — boy → Ishaan, girl → Sanvi
-        </p>
+      <aside className={`hud-card hud-card--empty ${calm ? "hud-card--calm" : ""}`}>
+        <p className="hud-card__hint">Looking for friends…</p>
+        <p className="muted">When someone appears, their name will show here</p>
       </aside>
     );
   }
@@ -25,9 +62,11 @@ export default function HudCard({ person }: HudCardProps) {
   const displayFacts = person.facts.filter(
     (f) => !f.toLowerCase().startsWith("linkedin:"),
   );
+  const cue = cues[cueIndex] ?? displayFacts[0] ?? "You know this person";
 
   return (
-    <aside className="hud-card hud-card--profile">
+    <aside className={`hud-card hud-card--profile ${calm ? "hud-card--calm" : ""}`}>
+      <p className="hud-card__eyebrow">This is</p>
       <div className="hud-card__head">
         {hasPhoto(person.photo) ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -47,48 +86,24 @@ export default function HudCard({ person }: HudCardProps) {
         </div>
       </div>
 
-      {person.linkedinUrl && (
-        <a
-          className="hud-card__linkedin"
-          href={person.linkedinUrl}
-          target="_blank"
-          rel="noreferrer"
-        >
-          View LinkedIn profile
-        </a>
-      )}
+      <p className="hud-card__coach">
+        Say their name: <strong>{firstName(person.name)}</strong>
+      </p>
 
-      {displayFacts.length > 0 ? (
-        <div className="hud-card__section">
-          <h3 className="hud-card__section-title">About</h3>
-          <ul>
-            {displayFacts.map((fact) => (
-              <li key={fact}>{fact}</li>
-            ))}
-          </ul>
-        </div>
-      ) : (
-        <p className="muted">No facts yet</p>
-      )}
+      <div className="hud-card__cue" key={cue}>
+        {cue}
+      </div>
 
-      {person.conversationHistory.length > 0 && (
-        <div className="hud-card__section">
-          <h3 className="hud-card__section-title">Recent chats</h3>
-          <ul className="hud-card__chats">
-            {person.conversationHistory.slice(-3).reverse().map((entry) => (
-              <li key={entry.sessionId}>
-                <span className="hud-card__chat-date">
-                  {entry.date.slice(0, 10)}
-                </span>
-                <span>
-                  {entry.summary ||
-                    (entry.topics.length > 0
-                      ? entry.topics.join(", ")
-                      : "Conversation")}
-                </span>
-              </li>
+      {present.length > 0 && (
+        <div className="hud-card__presence">
+          <span className="hud-card__section-title">With you now</span>
+          <div className="presence-chips">
+            {present.map((p) => (
+              <span key={p.personId} className="presence-chip">
+                {firstName(p.name)}
+              </span>
             ))}
-          </ul>
+          </div>
         </div>
       )}
     </aside>

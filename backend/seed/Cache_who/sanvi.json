@@ -1,0 +1,37 @@
+{
+  "personId": "sanvi-kaushik",
+  "name": "Sanvi",
+  "fullName": "Sanvi Kaushik",
+  "image": "IMG_6409.jpeg",
+  "gender": "female",
+  "relationship": "friend",
+  "headline": "SWE Intern @ Ericsson | prev BlackBerry | BEng @ Carleton",
+  "appearance": {
+    "summary": "Young woman with long dark wavy hair, warm smile, tortoise-shell sunglasses on her head",
+    "hair": "Long, dark, wavy; falls over both shoulders",
+    "eyes": "Dark brown",
+    "glasses": false,
+    "sunglassesOnHead": true,
+    "skinTone": "Medium brown",
+    "expression": "Slight pleasant smile",
+    "clothing": "Sleeveless tan ribbed top",
+    "accessories": [
+      "Tortoise-shell sunglasses perched on head",
+      "Small gold hoop earrings",
+      "Delicate gold necklace with circular pendant"
+    ],
+    "build": "Average, close-up selfie / portrait"
+  },
+  "facts": [
+    "Your friend Sanvi Kaushik",
+    "Software Developer / SWE Intern at Ericsson in Ottawa",
+    "Previously Software Development Intern at BlackBerry",
+    "Studying Bachelor of Engineering at Carleton University"
+  ],
+  "cues": [
+    "Say her name: Sanvi",
+    "Sanvi often wears sunglasses on her head",
+    "Sanvi works at Ericsson in Ottawa",
+    "Sanvi studied engineering at Carleton"
+  ]
+}
