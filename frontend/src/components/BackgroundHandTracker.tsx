@@ -52,7 +52,7 @@ export default function BackgroundHandTracker({
           if (cancelled) return;
           const v = videoRef.current;
           if (v && v.readyState >= 2) {
-            onTipRef.current(detectIndexTip(v, true));
+            onTipRef.current(detectIndexTip(v, false));
           }
           raf = requestAnimationFrame(tick);
         };

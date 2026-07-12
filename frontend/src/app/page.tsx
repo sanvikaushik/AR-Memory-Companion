@@ -34,6 +34,7 @@ export default function HomePage() {
     try {
       const profiles = await listCacheWho();
       const indexed = await loadCacheWhoIndex();
+      const usable = indexed.filter((p) => p.descriptors.length > 0);
       const list: Person[] = indexed.map((p) => ({
         personId: p.personId,
         name: p.fullName || p.name,
@@ -55,7 +56,9 @@ export default function HomePage() {
       setApiStatus(
         profiles.length === 0
           ? "Add JSON + photos in backend/seed/Cache_who"
-          : `${profiles.length} Cache_who profile(s) ready`,
+          : usable.length === 0
+            ? `Cache_who loaded but no faces found in photos (${profiles.length})`
+            : `${usable.length} Cache_who profile(s) ready`,
       );
     } catch (err) {
       setApiStatus(

@@ -1498,7 +1498,6 @@ textarea {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transform: scaleX(-1);
 }
 
 .point-quiz__option {

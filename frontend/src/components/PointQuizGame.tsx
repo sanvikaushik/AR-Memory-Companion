@@ -264,7 +264,12 @@ export default function PointQuizGame({ people, onTip }: PointQuizGameProps) {
             return;
           }
 
-          const finger = detectIndexTip(v, true);
+          let finger = null as ReturnType<typeof detectIndexTip>;
+          try {
+            finger = detectIndexTip(v, false);
+          } catch (err) {
+            console.warn("[PointQuizGame] tip detect", err);
+          }
           setTip(finger);
           onTipRef.current?.(finger);
 
@@ -317,11 +322,7 @@ export default function PointQuizGame({ people, onTip }: PointQuizGameProps) {
                   v.videoWidth,
                   v.videoHeight,
                 );
-                const mirrored = {
-                  ...padded,
-                  x: 1 - padded.x - padded.width,
-                };
-                const mapped = mapBoxToElementPercent(mirrored, v);
+                const mapped = mapBoxToElementPercent(padded, v);
                 setHead({
                   left: mapped.left,
                   top: mapped.top,

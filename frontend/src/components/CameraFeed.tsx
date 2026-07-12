@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   getTrackDescriptor,
+  getTrackDescriptors,
   loadFaceModels,
   mapBoxToElementPercent,
   startDetectionLoop,
@@ -11,6 +12,7 @@ import {
   getCacheWhoIndex,
   loadCacheWhoIndex,
   matchCacheWho,
+  profileFromCacheWhoId,
   type IndexedCacheWho,
 } from "@/lib/cacheWho";
 import type { Person, TrackedFace } from "@/lib/types";
@@ -170,8 +172,6 @@ export default function CameraFeed({
         setReady(true);
 
         stopLoop = startDetectionLoop(video, (faces) => {
-          onTipRef.current?.(detectIndexTip(video, true));
-
           const matchedPeople = new Map<string, Person>();
 
           const mapped: OverlayFace[] = faces.map((face) => {
@@ -182,14 +182,25 @@ export default function CameraFeed({
             const left = cx - size / 2;
             const top = cy - size / 2;
 
-            const descriptor = getTrackDescriptor(face.trackId);
-            const hit = matchCacheWho(descriptor);
+            // Prefer latest sample, then average — averaging can dilute a good pose.
+            const samples = getTrackDescriptors(face.trackId);
+            const latest = samples.length > 0 ? samples[samples.length - 1] : null;
+            const averaged = getTrackDescriptor(face.trackId);
+            const hit =
+              matchCacheWho(latest) ?? matchCacheWho(averaged);
 
             if (hit) {
               lockedPersonRef.current.set(face.trackId, hit.profile.personId);
             }
 
-            let profile: IndexedCacheWho | null = hit?.profile ?? null;
+            // FaceMatcher (enrolled Cache_who) often matches before the
+            // average-descriptor path — use that personId so labels stay correct.
+            let profile: IndexedCacheWho | null =
+              hit?.profile ??
+              (face.status === "known"
+                ? profileFromCacheWhoId(face.personId)
+                : null);
+
             if (!profile) {
               const lockedId = lockedPersonRef.current.get(face.trackId);
               if (lockedId) {
@@ -200,8 +211,8 @@ export default function CameraFeed({
             }
 
             if (profile) {
-              matchedPeople.set(profile.personId, profileToPerson(profile));
               lockedPersonRef.current.set(face.trackId, profile.personId);
+              matchedPeople.set(profile.personId, profileToPerson(profile));
             }
 
             if (!profile) {
@@ -254,6 +265,13 @@ export default function CameraFeed({
             };
           });
           onFacesRef.current(enriched);
+
+          // Hand tip after identity — never block Cache_who labeling.
+          try {
+            onTipRef.current?.(detectIndexTip(video, false));
+          } catch (err) {
+            console.warn("[CameraFeed] tip detect", err);
+          }
         });
       } catch (err) {
         if (!cancelled) {

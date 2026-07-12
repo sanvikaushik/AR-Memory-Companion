@@ -59,7 +59,7 @@ export async function loadHandLandmarker(): Promise<HandLandmarker> {
  */
 export function detectIndexTip(
   video: HTMLVideoElement,
-  mirrorX = true,
+  mirrorX = false,
 ): FingerTip | null {
   if (!landmarker || video.readyState < 2) return null;
 
@@ -91,7 +91,8 @@ export function detectIndexTip(
   }
   if (!best) return null;
 
-  // Selfie cameras feel mirrored; flip X so pointing at a visual corner matches.
+  // Keep raw video coordinates (no X flip). Callers that CSS-mirror the
+  // video should pass mirrorX=true so the cursor matches the mirrored view.
   const x = mirrorX ? 1 - best.x : best.x;
   return { x, y: best.y };
 }
