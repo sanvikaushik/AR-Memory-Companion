@@ -1,19 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import BackgroundHandTracker from "@/components/BackgroundHandTracker";
 import CameraFeed from "@/components/CameraFeed";
 import Flashcards from "@/components/Flashcards";
 import HudCard from "@/components/HudCard";
 import ModeNav, { type AppMode } from "@/components/ModeNav";
 import PhotoAlbum from "@/components/PhotoAlbum";
+import PointQuizGame from "@/components/PointQuizGame";
 import QuizScreen from "@/components/QuizScreen";
-import SessionControls from "@/components/SessionControls";
 import { listCacheWho } from "@/lib/api";
 import { enrollPeople } from "@/lib/faceDetection";
 import { loadCacheWhoIndex } from "@/lib/cacheWho";
+import type { FingerTip } from "@/lib/handTracking";
 import type { Person, TrackedFace } from "@/lib/types";
 
-/** Wearable dementia companion: live AR + Cache_who identity + cards/photos/quiz. */
+/** Fully hands-free wearable companion — point to navigate, no clicks. */
 export default function HomePage() {
   const [people, setPeople] = useState<Person[]>([]);
   const [recognizedPeople, setRecognizedPeople] = useState<Person[]>([]);
@@ -22,10 +24,11 @@ export default function HomePage() {
   );
   const [mode, setMode] = useState<AppMode>("live");
   const [apiStatus, setApiStatus] = useState("Connecting…");
-  const [calm, setCalm] = useState(false);
-  const [sessionOpen, setSessionOpen] = useState(false);
+  const [tip, setTip] = useState<FingerTip | null>(null);
 
   const activePerson = recognizedPeople[0] ?? null;
+  const needsBackgroundHands =
+    mode === "cards" || mode === "album" || mode === "quiz";
 
   const refreshCacheWho = useCallback(async () => {
     try {
@@ -100,10 +103,18 @@ export default function HomePage() {
   }, []);
 
   return (
-    <div className={`stage ${calm ? "stage--calm" : ""}`}>
+    <div className="stage stage--handsfree">
+      {needsBackgroundHands && (
+        <BackgroundHandTracker active onTip={setTip} />
+      )}
+
       {mode === "live" && (
         <div className="stage__camera">
-          <CameraFeed onFaces={onFaces} onMatchedPeople={onMatchedPeople} />
+          <CameraFeed
+            onFaces={onFaces}
+            onMatchedPeople={onMatchedPeople}
+            onTip={setTip}
+          />
         </div>
       )}
 
@@ -113,15 +124,11 @@ export default function HomePage() {
             <div className="top-bar__info">
               <h1>Memory Companion</h1>
               <p className="top-bar__hint">{recognitionHint}</p>
-              {!calm && <p className="top-bar__status">{apiStatus}</p>}
+              <p className="top-bar__status">{apiStatus}</p>
+              <p className="top-bar__status">
+                Point at bottom tabs to switch modes — no tapping needed
+              </p>
             </div>
-            <button
-              type="button"
-              className="ghost-btn"
-              onClick={() => setCalm((c) => !c)}
-            >
-              {calm ? "More detail" : "Calm view"}
-            </button>
           </div>
 
           <div className="hud-stack">
@@ -131,47 +138,20 @@ export default function HomePage() {
                   key={person.personId}
                   person={person}
                   present={recognizedPeople}
-                  calm={calm}
+                  calm
                 />
               ))
             ) : (
-              <HudCard person={null} calm={calm} />
-            )}
-          </div>
-
-          <div className={`dock ${calm && !sessionOpen ? "dock--collapsed" : ""}`}>
-            {calm && !sessionOpen ? (
-              <button
-                type="button"
-                className="ghost-btn"
-                onClick={() => setSessionOpen(true)}
-              >
-                Conversation
-              </button>
-            ) : (
-              <>
-                {calm && (
-                  <button
-                    type="button"
-                    className="ghost-btn dock__hide"
-                    onClick={() => setSessionOpen(false)}
-                  >
-                    Hide
-                  </button>
-                )}
-                <SessionControls
-                  personId={activePerson?.personId}
-                  personName={activePerson?.name}
-                  speakerNames={
-                    people.length > 0
-                      ? people.map((p) => p.name)
-                      : ["Ishaan Chandra", "Sanvi Kaushik"]
-                  }
-                />
-              </>
+              <HudCard person={null} calm />
             )}
           </div>
         </>
+      )}
+
+      {mode === "game" && (
+        <div className="mode-overlay mode-overlay--game">
+          <PointQuizGame people={people} onTip={setTip} />
+        </div>
       )}
 
       {mode === "cards" && (
@@ -200,18 +180,22 @@ export default function HomePage() {
             <section className="mode-panel">
               <h2>Quiz</h2>
               <p className="mode-panel__lead">
-                Cache_who profiles will appear when the backend is ready.
+                Looking for Cache_who friends…
               </p>
             </section>
           )}
         </div>
       )}
 
-      <ModeNav
-        mode={mode}
-        onChange={setMode}
-        quizDisabled={!(activePerson || people[0])}
-      />
+      {/* Finger cursor for non-game modes */}
+      {tip && mode !== "game" && (
+        <div
+          className="handsfree-cursor"
+          style={{ left: `${tip.x * 100}%`, top: `${tip.y * 100}%` }}
+        />
+      )}
+
+      <ModeNav mode={mode} onChange={setMode} tip={tip} />
     </div>
   );
 }

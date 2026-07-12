@@ -5,7 +5,7 @@
   "image": "IMG_7655.jpeg",
   "gender": "male",
   "relationship": "friend",
-  "headline": "SWE Intern @ Ericsson | CS, ML & AI @ Carleton",
+  "headline": "Loves long walks, bad dad jokes, and hot chocolate",
   "appearance": {
     "summary": "Young man with short dark hair, thin metal-frame glasses, warm smile",
     "hair": "Short, dark, neatly styled",
@@ -19,15 +19,16 @@
     "build": "Average, chest-up portrait"
   },
   "facts": [
-    "Your friend Ishaan Chandra",
-    "Software Engineer Intern at Ericsson in Ottawa",
-    "Studies Computer Science, Machine Learning and AI at Carleton University",
-    "Previously Software Developer at Transport Canada"
+    "Ishaan always remembers to bring you a snack",
+    "Ishaan’s favorite drink is hot chocolate with extra marshmallows",
+    "Ishaan tells the same joke about pigeons every visit",
+    "Ishaan loves looking at mountains and big blue water",
+    "Ishaan wears glasses and a small silver chain"
   ],
   "cues": [
     "Say his name: Ishaan",
     "Ishaan wears glasses",
-    "Ishaan works at Ericsson in Ottawa",
-    "Ishaan studies computer science at Carleton"
+    "Ask Ishaan about his pigeon joke",
+    "Ishaan likes hot chocolate"
   ]
 }

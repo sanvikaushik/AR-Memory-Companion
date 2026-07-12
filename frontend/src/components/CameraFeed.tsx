@@ -14,11 +14,16 @@ import {
   type IndexedCacheWho,
 } from "@/lib/cacheWho";
 import type { Person, TrackedFace } from "@/lib/types";
+import {
+  detectIndexTip,
+  loadHandLandmarker,
+  type FingerTip,
+} from "@/lib/handTracking";
 
 type CameraFeedProps = {
   onFaces: (faces: TrackedFace[]) => void;
-  /** Called with Cache_who people currently matched in frame. */
   onMatchedPeople?: (people: Person[]) => void;
+  onTip?: (tip: FingerTip | null) => void;
 };
 
 type OverlayFace = {
@@ -64,10 +69,15 @@ function profileToPerson(profile: IndexedCacheWho): Person {
  * Matches live faces only against backend/seed/Cache_who.
  * No match → "Unknown person".
  */
-export default function CameraFeed({ onFaces, onMatchedPeople }: CameraFeedProps) {
+export default function CameraFeed({
+  onFaces,
+  onMatchedPeople,
+  onTip,
+}: CameraFeedProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const onFacesRef = useRef(onFaces);
   const onMatchedRef = useRef(onMatchedPeople);
+  const onTipRef = useRef(onTip);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [loadingModels, setLoadingModels] = useState(true);
@@ -78,6 +88,7 @@ export default function CameraFeed({ onFaces, onMatchedPeople }: CameraFeedProps
 
   onFacesRef.current = onFaces;
   onMatchedRef.current = onMatchedPeople;
+  onTipRef.current = onTip;
 
   useEffect(() => {
     let stopLoop: (() => void) | undefined;
@@ -125,6 +136,11 @@ export default function CameraFeed({ onFaces, onMatchedPeople }: CameraFeedProps
         setReady(false);
         setLoadingModels(true);
         await loadFaceModels();
+        try {
+          await loadHandLandmarker();
+        } catch (err) {
+          console.warn("[CameraFeed] hands unavailable", err);
+        }
         if (cancelled) return;
 
         try {
@@ -154,6 +170,8 @@ export default function CameraFeed({ onFaces, onMatchedPeople }: CameraFeedProps
         setReady(true);
 
         stopLoop = startDetectionLoop(video, (faces) => {
+          onTipRef.current?.(detectIndexTip(video, true));
+
           const matchedPeople = new Map<string, Person>();
 
           const mapped: OverlayFace[] = faces.map((face) => {
@@ -256,6 +274,13 @@ export default function CameraFeed({ onFaces, onMatchedPeople }: CameraFeedProps
     };
   }, [camRetry]);
 
+  // Hands-free: auto-retry camera if it fails.
+  useEffect(() => {
+    if (!error) return;
+    const id = window.setTimeout(() => setCamRetry((n) => n + 1), 3500);
+    return () => window.clearTimeout(id);
+  }, [error]);
+
   return (
     <div className="camera-feed">
       <video ref={videoRef} playsInline muted className="camera-video" />
@@ -299,13 +324,7 @@ export default function CameraFeed({ onFaces, onMatchedPeople }: CameraFeedProps
       {error && (
         <div className="camera-error-box">
           <p className="camera-error">{error}</p>
-          <button
-            type="button"
-            className="ghost-btn"
-            onClick={() => setCamRetry((n) => n + 1)}
-          >
-            Retry camera
-          </button>
+          <p className="muted">Retrying automatically…</p>
         </div>
       )}
     </div>
